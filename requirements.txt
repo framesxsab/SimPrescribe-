@@ -1,0 +1,11 @@
+easyocr
+fastapi
+huggingface_hub
+httpx
+jinja2
+Pillow
+PyMuPDF
+pytest
+python-dotenv
+python-multipart
+uvicorn[standard]

@@ -47,9 +47,9 @@ async def save_upload(file: UploadFile) -> Path:
 
 async def render_dashboard(request: Request, templates) -> HTMLResponse:
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "recent_analyses": load_history()[:5],
             "max_upload_mb": settings.max_upload_mb,
             "app_name": settings.app_name,
@@ -58,20 +58,14 @@ async def render_dashboard(request: Request, templates) -> HTMLResponse:
 
 
 async def render_history(request: Request, templates) -> HTMLResponse:
-    return templates.TemplateResponse(
-        "history.html",
-        {"request": request, "analyses": load_history(), "app_name": settings.app_name},
-    )
+    return templates.TemplateResponse(request, "history.html", {"analyses": load_history(), "app_name": settings.app_name})
 
 
 async def render_details(request: Request, analysis_id: str, templates) -> HTMLResponse:
     analysis = get_analysis_record(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
-    return templates.TemplateResponse(
-        "details.html",
-        {"request": request, "analysis": analysis, "app_name": settings.app_name},
-    )
+    return templates.TemplateResponse(request, "details.html", {"analysis": analysis, "app_name": settings.app_name})
 
 
 async def history_payload() -> dict[str, Any]:

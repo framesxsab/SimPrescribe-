@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+archive (3)/
+synthetic_prescription_dataset/
+uploads/*
+data/analysis_history.json
