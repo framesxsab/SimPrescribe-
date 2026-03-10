@@ -14,9 +14,9 @@
             theme: {
                 extend: {
                     colors: {
-                        "primary": "#6600ff",
-                        "background-light": "#f7f5f8",
-                        "background-dark": "#170f23",
+                        "primary": "#0f766e",
+                        "background-light": "#f3f7f6",
+                        "background-dark": "#10201d",
                     },
                     fontFamily: {
                         "display": ["Inter"]
@@ -31,45 +31,46 @@
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 min-h-screen">
-<header class="sticky top-0 z-50 border-b border-primary/10 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-md">
-    <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+<header class="sticky top-0 z-50 border-b border-slate-200/80 dark:border-slate-800 bg-background-light/90 dark:bg-background-dark/90 backdrop-blur-md">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white">
-                <span class="material-symbols-outlined text-2xl">health_metrics</span>
+            <div class="w-9 h-9 bg-primary rounded-xl flex items-center justify-center text-white">
+                <span class="material-symbols-outlined text-xl">health_metrics</span>
             </div>
             <h1 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white">{{ app_name }}</h1>
         </div>
-        <nav class="hidden md:flex items-center gap-10">
+        <nav class="hidden md:flex items-center gap-8">
             <a class="text-sm font-semibold text-primary" href="/">Dashboard</a>
             <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="/history">History</a>
             <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="#recent-activity">Recent Activity</a>
         </nav>
-        <span class="rounded-full border border-primary/20 bg-primary/5 px-4 py-2 text-xs font-semibold text-primary">Configurable inference pipeline</span>
+        <span class="hidden lg:inline text-xs font-medium text-slate-500 dark:text-slate-400">OCR + medicine reference datasets</span>
     </div>
 </header>
-<main class="max-w-5xl mx-auto px-6 py-12">
-    <section class="text-center mb-16">
-        <h2 class="text-4xl md:text-5xl font-extrabold text-slate-900 dark:text-white mb-4 tracking-tight">
-            Your Health, <span class="text-primary">Decoded.</span>
+<main class="max-w-6xl mx-auto px-6 py-10">
+    <section class="mb-12 max-w-3xl">
+        <p class="text-sm font-semibold text-primary mb-3">Prescription analysis workspace</p>
+        <h2 class="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight">
+            Turn scanned prescriptions into a structured medication summary.
         </h2>
-        <p class="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto leading-relaxed">
-            Upload a prescription image or PDF and convert OCR output into a cleaner medication summary that is easier to review.
+        <p class="text-base text-slate-600 dark:text-slate-400 leading-relaxed">
+            Upload a prescription image or PDF to extract OCR text, standardize the medicine instructions, and enrich the result with dataset-backed reference fields.
         </p>
     </section>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-16">
-        <div class="bg-white dark:bg-slate-900/50 p-8 rounded-xl border border-primary/10 shadow-sm flex flex-col items-center justify-center text-center">
-            <form id="upload-form" class="w-full h-64 border-2 border-dashed border-primary/30 rounded-xl bg-primary/5 flex flex-col items-center justify-center group cursor-pointer hover:border-primary hover:bg-primary/10 transition-all relative">
+        <div class="bg-white dark:bg-slate-900/50 p-8 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center justify-center text-center">
+            <form id="upload-form" class="w-full h-64 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900/60 flex flex-col items-center justify-center group cursor-pointer hover:border-primary hover:bg-primary/5 transition-all relative">
                 <input type="file" id="prescription_image" name="file" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept="image/png, image/jpeg, image/webp, application/pdf">
                 <span class="material-symbols-outlined text-4xl text-primary mb-3">cloud_upload</span>
                 <p class="text-slate-900 dark:text-white font-semibold mb-1" id="upload-text">Drag and drop prescription</p>
-                <p class="text-xs text-slate-500 mb-6 uppercase tracking-widest font-bold">PDF, JPG, PNG, or WEBP</p>
-                <button type="button" class="bg-primary text-white px-6 py-3 rounded-lg font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] transition-transform pointer-events-none">
+                <p class="text-xs text-slate-500 mb-6 font-medium">PDF, JPG, PNG, or WEBP</p>
+                <button type="button" class="bg-primary text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-sm hover:bg-primary/90 transition-colors pointer-events-none">
                     Select File
                 </button>
             </form>
             <div class="mt-4 w-full text-center">
-                 <button id="analyze-btn" class="hidden bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-8 py-3 rounded-lg font-bold text-sm shadow-lg hover:scale-[1.02] transition-transform mx-auto">Analyze Now</button>
+                 <button id="analyze-btn" class="hidden bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-8 py-3 rounded-xl font-semibold text-sm shadow-sm hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors mx-auto">Analyze Now</button>
             </div>
             <p class="mt-4 text-xs text-slate-500">Maximum upload size: {{ max_upload_mb }} MB</p>
             <div class="mt-6 flex items-center gap-2 text-slate-500 text-xs text-center mx-auto justify-center">
@@ -78,19 +79,16 @@
             </div>
         </div>
         
-        <div class="relative group">
-            <div class="absolute -inset-1 bg-gradient-to-r from-primary/20 to-primary/5 rounded-2xl blur opacity-25"></div>
-            <div class="relative h-full bg-white dark:bg-slate-800 rounded-xl border border-primary/10 overflow-hidden shadow-xl">
-                <div class="absolute top-0 left-0 w-full h-1 bg-primary"></div>
+        <div class="h-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
                 <div class="p-6 h-full flex flex-col">
                     <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-sm font-bold uppercase tracking-wider text-slate-400">Scan Preview</h3>
-                        <span id="scan-status" class="px-2 py-1 bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400 text-[10px] font-bold rounded uppercase">Awaiting File</span>
+                        <h3 class="text-sm font-semibold tracking-wide text-slate-500">Scan Preview</h3>
+                        <span id="scan-status" class="px-3 py-1.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-bold rounded-full uppercase">Awaiting File</span>
                     </div>
-                    <div class="flex-1 rounded-lg bg-slate-50 dark:bg-slate-900/80 border border-slate-100 dark:border-slate-700 overflow-hidden relative flex items-center justify-center">
+                    <div class="flex-1 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden relative flex items-center justify-center">
                         <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
                         <img id="preview-image" class="hidden w-full h-full object-cover" src="" alt="Preview"/>
-                        <div id="pdf-preview-label" class="hidden absolute inset-6 rounded-2xl border border-dashed border-primary/30 bg-white/80 dark:bg-slate-800/80 px-6 py-8 text-center">
+                        <div id="pdf-preview-label" class="hidden absolute inset-6 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/90 px-6 py-8 text-center">
                             <span class="material-symbols-outlined text-5xl text-primary">picture_as_pdf</span>
                             <p class="mt-4 text-sm font-bold text-slate-900 dark:text-white">PDF document ready</p>
                             <p class="mt-2 text-xs text-slate-500">The first page will be converted before OCR.</p>
@@ -109,9 +107,12 @@
     
     <section id="results-area" class="hidden">
         <div class="flex items-center justify-between mb-8">
-            <h3 class="text-2xl font-bold text-slate-900 dark:text-white">Analyzed Medications</h3>
-            <button id="download-report-btn" class="text-primary text-sm font-bold flex items-center gap-1 hover:underline">
-                Download Report
+            <div>
+                <h3 class="text-2xl font-bold text-slate-900 dark:text-white">Medication summary</h3>
+                <p class="mt-1 text-sm text-slate-500">Prescription instructions paired with structured medicine references from both datasets.</p>
+            </div>
+            <button id="download-report-btn" class="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:border-slate-400 transition-colors">
+                Download PDF report
                 <span class="material-symbols-outlined text-sm">download</span>
             </button>
         </div>
@@ -130,8 +131,8 @@
         {% if recent_analyses %}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             {% for analysis in recent_analyses %}
-            <a href="/details/{{ analysis.id }}" class="block rounded-xl border border-primary/10 bg-white dark:bg-slate-900/50 p-5 shadow-sm hover:shadow-md transition-shadow">
-                <p class="text-[11px] uppercase tracking-[0.2em] text-slate-500 font-bold">{{ analysis.created_at }}</p>
+            <a href="/details/{{ analysis.id }}" class="block rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 p-5 shadow-sm hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
+                <p class="text-[11px] uppercase tracking-[0.12em] text-slate-500 font-semibold">{{ analysis.created_at }}</p>
                 <h4 class="mt-2 text-lg font-bold text-slate-900 dark:text-white">{{ analysis.filename }}</h4>
                 <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
                     {{ analysis.medications|length }} medication{% if analysis.medications|length != 1 %}s{% endif %} extracted
@@ -140,7 +141,7 @@
             {% endfor %}
         </div>
         {% else %}
-        <div class="rounded-xl border border-dashed border-primary/20 bg-white/70 dark:bg-slate-900/40 p-8 text-center text-sm text-slate-500">
+        <div class="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 p-8 text-center text-sm text-slate-500">
             No saved analyses yet. Your recent scans will appear here.
         </div>
         {% endif %}
@@ -148,59 +149,97 @@
 </main>
 
 <template id="medication-card-template">
-    <div class="bg-white dark:bg-slate-900 rounded-xl border border-primary/10 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-        <div class="flex flex-col gap-6 p-8">
-            <div class="flex flex-col md:flex-row md:items-start justify-between gap-4">
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
+        <div class="border-b border-slate-200 dark:border-slate-800 px-8 py-6">
+            <div class="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
                 <div class="flex items-start gap-4">
                     <div class="med-badge flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-lg font-black text-primary"></div>
                     <div>
-                        <div class="flex items-center gap-3 flex-wrap">
-                            <h4 class="med-name text-2xl font-bold text-slate-900 dark:text-white"></h4>
-                            <span class="med-type bg-primary text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-widest"></span>
+                        <div class="flex items-center gap-2 flex-wrap mb-2">
+                            <span class="med-source bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-[0.08em]"></span>
+                            <span class="med-type bg-primary/10 text-primary text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-[0.08em]"></span>
                         </div>
+                        <h4 class="med-name text-2xl font-bold text-slate-900 dark:text-white"></h4>
                         <p class="med-desc mt-2 text-slate-500 text-sm"></p>
                     </div>
                 </div>
-                <a href="#" class="med-details-link bg-slate-50 dark:bg-slate-800 hover:bg-primary/10 hover:text-primary transition-all text-slate-600 dark:text-slate-300 px-4 py-2 rounded-lg text-sm font-bold border border-slate-100 dark:border-slate-700">
-                    Full Details
+                <a href="#" class="med-details-link bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 dark:border-slate-700">
+                    Open Analysis
                 </a>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div class="p-3 rounded-lg bg-background-light dark:bg-slate-800/50">
-                    <p class="text-[10px] uppercase font-bold text-slate-400 mb-1">Dosage</p>
+        </div>
+        <div class="flex flex-col gap-6 p-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+                <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 mb-1 tracking-[0.08em]">Dosage</p>
                     <p class="med-dosage text-sm font-bold text-slate-800 dark:text-slate-200"></p>
                 </div>
-                <div class="p-3 rounded-lg bg-background-light dark:bg-slate-800/50">
-                    <p class="text-[10px] uppercase font-bold text-slate-400 mb-1">Frequency</p>
+                <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 mb-1 tracking-[0.08em]">Frequency</p>
                     <p class="med-frequency text-sm font-bold text-slate-800 dark:text-slate-200"></p>
                 </div>
-                <div class="p-3 rounded-lg bg-background-light dark:bg-slate-800/50">
-                    <p class="text-[10px] uppercase font-bold text-slate-400 mb-1">Duration</p>
+                <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 mb-1 tracking-[0.08em]">Duration</p>
                     <p class="med-duration text-sm font-bold text-slate-800 dark:text-slate-200"></p>
                 </div>
+                <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 mb-1 tracking-[0.08em]">Therapeutic Class</p>
+                    <p class="med-therapeutic text-sm font-bold text-slate-800 dark:text-slate-200"></p>
+                </div>
+                <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 mb-1 tracking-[0.08em]">Pack / Manufacturer</p>
+                    <p class="med-pack text-sm font-bold text-slate-800 dark:text-slate-200"></p>
+                </div>
             </div>
-            <div class="p-4 rounded-lg bg-primary/5 border border-primary/10 flex gap-3">
-                <span class="material-symbols-outlined text-primary text-xl">fact_check</span>
-                <div>
-                    <p class="text-xs font-bold text-primary uppercase tracking-tighter mb-1">Medication Note</p>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <section class="med-composition-wrap rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 p-5">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 tracking-[0.08em]">Composition</p>
+                    <p class="med-composition mt-3 text-sm leading-6 text-slate-700 dark:text-slate-300"></p>
+                </section>
+                <section class="med-classes-wrap rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 p-5">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 tracking-[0.08em]">Reference Classes</p>
+                    <div class="mt-3 space-y-2 text-sm text-slate-700 dark:text-slate-300">
+                        <p><span class="font-semibold text-slate-900 dark:text-white">Chemical:</span> <span class="med-chemical"></span></p>
+                        <p><span class="font-semibold text-slate-900 dark:text-white">Action:</span> <span class="med-action"></span></p>
+                    </div>
+                </section>
+                <section class="med-substitutes-wrap rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 p-5">
+                    <div class="flex items-center justify-between gap-3">
+                        <p class="text-[10px] uppercase font-semibold text-slate-400 tracking-[0.08em]">Substitutes</p>
+                        <span class="med-substitutes-count text-xs font-bold text-slate-500"></span>
+                    </div>
+                    <div class="med-substitutes mt-3 flex flex-wrap gap-2"></div>
+                </section>
+                <section class="med-uses-wrap rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 p-5">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 tracking-[0.08em]">Common Uses</p>
+                    <div class="med-uses mt-3 flex flex-wrap gap-2"></div>
+                </section>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-[1fr_0.9fr] gap-4">
+                <div class="p-5 rounded-2xl bg-primary/5 border border-primary/10">
+                    <p class="text-xs font-semibold text-primary uppercase tracking-[0.08em] mb-2">Medication Note</p>
                     <p class="med-insight text-sm text-slate-700 dark:text-slate-300 leading-relaxed"></p>
+                </div>
+                <div class="med-effects-wrap p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-800">
+                    <p class="text-[10px] uppercase font-semibold text-slate-400 tracking-[0.08em]">Side Effects Snapshot</p>
+                    <div class="med-effects mt-3 flex flex-wrap gap-2"></div>
                 </div>
             </div>
         </div>
     </div>
 </template>
 
-<footer class="mt-20 border-t border-primary/10 py-12 bg-white dark:bg-slate-950">
+<footer class="mt-20 border-t border-slate-200 dark:border-slate-800 py-10 bg-white dark:bg-slate-950">
     <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
-        <div class="flex items-center gap-3 grayscale opacity-70">
-            <div class="w-8 h-8 bg-slate-400 rounded-lg flex items-center justify-center text-white">
+        <div class="flex items-center gap-3 opacity-80">
+            <div class="w-8 h-8 bg-slate-500 rounded-lg flex items-center justify-center text-white">
                 <span class="material-symbols-outlined text-lg">health_metrics</span>
             </div>
             <h1 class="text-lg font-bold tracking-tight text-slate-900 dark:text-white">{{ app_name }}</h1>
         </div>
         <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-900/30 px-4 py-2 rounded-full border border-slate-200 dark:border-slate-700">
             <span class="material-symbols-outlined text-slate-600 dark:text-slate-300 text-lg">memory</span>
-            <span class="text-xs font-bold text-slate-700 dark:text-slate-300 tracking-wide uppercase">Local history enabled</span>
+            <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 tracking-wide uppercase">Local history enabled</span>
         </div>
     </div>
 </footer>
@@ -216,15 +255,219 @@
     const resultsArea = document.getElementById('results-area');
     const medicationsContainer = document.getElementById('medications-container');
     const template = document.getElementById('medication-card-template');
+    let lastAnalysis = null;
 
     const pdfPlaceholderSvg = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
         <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
             <rect width="1200" height="800" fill="#f8fafc"/>
             <rect x="320" y="120" width="560" height="560" rx="42" fill="#ffffff" stroke="#e2e8f0" stroke-width="12"/>
-            <text x="600" y="330" text-anchor="middle" fill="#6600ff" font-size="80" font-family="Arial, sans-serif">PDF</text>
+            <text x="600" y="330" text-anchor="middle" fill="#0f766e" font-size="80" font-family="Arial, sans-serif">PDF</text>
             <text x="600" y="420" text-anchor="middle" fill="#475569" font-size="32" font-family="Arial, sans-serif">Preview generated from first page at scan time</text>
         </svg>
     `)}`;
+
+    function safeList(values) {
+        return Array.isArray(values) ? values.filter(Boolean) : [];
+    }
+
+    function setText(node, value, fallback = 'Not available') {
+        if (!node) return;
+        node.textContent = value && String(value).trim() ? String(value).trim() : fallback;
+    }
+
+    function renderChips(container, values, emptyLabel) {
+        if (!container) return;
+        container.innerHTML = '';
+        const items = safeList(values);
+        if (!items.length) {
+            const chip = document.createElement('span');
+            chip.className = 'inline-flex items-center rounded-full bg-slate-200 dark:bg-slate-700 px-3 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300';
+            chip.textContent = emptyLabel;
+            container.appendChild(chip);
+            return;
+        }
+
+        items.forEach(value => {
+            const chip = document.createElement('span');
+            chip.className = 'inline-flex items-center rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200';
+            chip.textContent = value;
+            container.appendChild(chip);
+        });
+    }
+
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function formatPackAndManufacturer(med) {
+        const parts = [med.pack_size, med.manufacturer].filter(Boolean);
+        return parts.length ? parts.join(' • ') : 'Not available';
+    }
+
+    function createReportNode(data) {
+        const reportRoot = document.createElement('div');
+        reportRoot.style.width = '210mm';
+        reportRoot.style.background = '#ffffff';
+        reportRoot.style.color = '#0f172a';
+        reportRoot.style.padding = '10mm';
+        reportRoot.style.fontFamily = 'Inter, sans-serif';
+
+        const meds = Array.isArray(data.medications) ? data.medications : [];
+        const datasets = [...new Set(meds.flatMap(med => safeList(med.source_datasets)))];
+        const generatedAt = new Date().toLocaleString();
+        const analysisCreatedAt = data.created_at ? new Date(data.created_at).toLocaleString() : 'Not available';
+
+        reportRoot.innerHTML = `
+            <section style="page-break-after:always;border:1px solid #dbe4e2;border-radius:16px;overflow:hidden;background:#ffffff;min-height:257mm;display:flex;flex-direction:column;justify-content:space-between;">
+                <div style="background:#f8fafc;color:#0f172a;padding:14px 16px 12px;border-bottom:1px solid #e2e8f0;">
+                    <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#64748b;">${escapeHtml('{{ app_name }}')}</p>
+                    <h1 style="margin:0;font-size:26px;line-height:1.12;font-weight:800;">Prescription Analysis Report</h1>
+                    <p style="margin:8px 0 0;font-size:13px;line-height:1.5;color:#475569;">A structured reading aid generated from OCR extraction and medicine-dataset enrichment.</p>
+                </div>
+                <div style="padding:16px 16px 8px;display:grid;gap:12px;">
+                    <section style="border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px 14px;">
+                        <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">Document Reference</p>
+                        <p style="margin:0 0 10px;font-size:24px;line-height:1.2;font-weight:800;color:#0f172a;word-break:break-word;">${escapeHtml(data.filename || 'Prescription Upload')}</p>
+                        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Analysis ID</p>
+                                <p style="margin:0;font-size:13px;line-height:1.4;color:#0f172a;word-break:break-word;">${escapeHtml(data.analysis_id || data.id || 'Not available')}</p>
+                            </div>
+                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Analysis Created</p>
+                                <p style="margin:0;font-size:13px;line-height:1.4;color:#0f172a;">${escapeHtml(analysisCreatedAt)}</p>
+                            </div>
+                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Report Generated</p>
+                                <p style="margin:0;font-size:13px;line-height:1.4;color:#0f172a;">${escapeHtml(generatedAt)}</p>
+                            </div>
+                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Medication Count</p>
+                                <p style="margin:0;font-size:13px;line-height:1.4;color:#0f172a;">${meds.length}</p>
+                            </div>
+                        </div>
+                    </section>
+                    <section style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:11px 13px;background:#ffffff;">
+                            <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Data Sources</p>
+                            <p style="margin:0;font-size:13px;line-height:1.55;color:#334155;">${escapeHtml(datasets.join(', ') || 'OCR only')}</p>
+                        </div>
+                        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:11px 13px;background:#ffffff;">
+                            <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Report Scope</p>
+                            <p style="margin:0;font-size:13px;line-height:1.55;color:#334155;">Medication instructions, reference matches, substitutes, uses, and common side effects when available.</p>
+                        </div>
+                    </section>
+                </div>
+                <div style="padding:0 16px 16px;display:grid;gap:10px;">
+                    <div style="border-top:1px solid #e2e8f0;padding-top:10px;">
+                        <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Important Note</p>
+                        <p style="margin:0;font-size:12px;line-height:1.65;color:#475569;">This document is a structured summary for review. It should be checked against the original prescription, pharmacist guidance, and clinician instructions before use.</p>
+                    </div>
+                </div>
+            </section>
+            <div style="border:1px solid #dbe4e2;border-radius:18px;overflow:hidden;">
+                <div style="background:#f8fafc;color:#0f172a;padding:12px 14px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:1px solid #e2e8f0;">
+                    <div>
+                        <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">${escapeHtml('{{ app_name }}')}</p>
+                        <h1 style="margin:0;font-size:23px;line-height:1.15;font-weight:800;">Prescription Analysis Report</h1>
+                        <p style="margin:6px 0 0;font-size:12px;color:#475569;">Structured OCR output enriched with dataset-backed medicine references.</p>
+                    </div>
+                    <div style="text-align:right;font-size:11px;line-height:1.55;min-width:170px;color:#334155;">
+                        <p style="margin:0;"><strong>Report ID:</strong> ${escapeHtml(data.analysis_id || data.id || 'Not available')}</p>
+                        <p style="margin:0;"><strong>Generated:</strong> ${escapeHtml(generatedAt)}</p>
+                        <p style="margin:0;"><strong>Analysis Time:</strong> ${escapeHtml(analysisCreatedAt)}</p>
+                    </div>
+                </div>
+                <div style="padding:12px 14px;background:#f8fafc;display:grid;grid-template-columns:1.15fr 0.85fr;gap:10px;align-items:start;">
+                    <div>
+                        <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">Document</p>
+                        <p style="margin:0;font-size:19px;font-weight:800;color:#0f172a;line-height:1.18;">${escapeHtml(data.filename || 'Prescription Upload')}</p>
+                        <p style="margin:6px 0 0;font-size:11px;line-height:1.5;color:#475569;">This report is intended as a structured reading aid and should be cross-checked against the original prescription.</p>
+                    </div>
+                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
+                        <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Summary</p>
+                        <p style="margin:0 0 4px;font-size:12px;"><strong>Medications:</strong> ${meds.length}</p>
+                        <p style="margin:0 0 4px;font-size:12px;"><strong>Datasets:</strong> ${escapeHtml(datasets.join(', ') || 'OCR only')}</p>
+                        <p style="margin:0;font-size:12px;"><strong>OCR Text:</strong> ${data.raw_text ? 'Captured' : 'Unavailable'}</p>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:10px;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;background:#ffffff;">
+                <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Interpretation Notes</p>
+                <ul style="margin:0;padding-left:16px;font-size:11px;line-height:1.55;color:#334155;">
+                    <li>Instruction fields such as dosage, frequency, and duration come from OCR extraction and post-processing.</li>
+                    <li>Reference fields such as composition, classes, uses, substitutes, and side effects come from the two linked medicine datasets when a match is found.</li>
+                    <li>Ambiguous medicines should be verified manually against the original prescription and packaging.</li>
+                </ul>
+            </div>
+            <div style="margin-top:10px;display:grid;gap:10px;">
+                ${meds.map((med, index) => `
+                    <section style="page-break-inside:avoid;border:1px solid #dbe4e2;border-radius:14px;padding:12px;background:#ffffff;">
+                        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:1px solid #ecf0ef;padding-bottom:10px;">
+                            <div>
+                                <p style="margin:0 0 5px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Medication ${index + 1}</p>
+                                <h2 style="margin:0 0 6px;font-size:19px;line-height:1.15;">${escapeHtml(med.name)}</h2>
+                                <p style="margin:0;font-size:12px;color:#475569;">${escapeHtml(med.category || 'General')} • ${escapeHtml(med.type || 'Medication')} • ${escapeHtml(med.source || 'OCR only')}</p>
+                            </div>
+                            <div style="text-align:right;font-size:12px;line-height:1.45;color:#0f172a;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;min-width:165px;">
+                                <p style="margin:0 0 3px;"><strong>Dosage:</strong> ${escapeHtml(med.dosage || 'N/A')}</p>
+                                <p style="margin:0 0 3px;"><strong>Frequency:</strong> ${escapeHtml(med.frequency || 'N/A')}</p>
+                                <p style="margin:0;"><strong>Duration:</strong> ${escapeHtml(med.duration || 'N/A')}</p>
+                            </div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px;">
+                            <div style="background:#f8fafc;border-radius:10px;padding:9px 11px;border:1px solid #e2e8f0;">
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Composition</p>
+                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(med.composition || 'Not available')}</p>
+                            </div>
+                            <div style="background:#f8fafc;border-radius:10px;padding:9px 11px;border:1px solid #e2e8f0;">
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Therapeutic / Reference</p>
+                                <p style="margin:0 0 3px;font-size:12px;color:#334155;"><strong>Therapeutic:</strong> ${escapeHtml(med.therapeutic_class || 'Not available')}</p>
+                                <p style="margin:0 0 3px;font-size:12px;color:#334155;"><strong>Chemical:</strong> ${escapeHtml(med.chemical_class || 'Not available')}</p>
+                                <p style="margin:0;font-size:12px;color:#334155;"><strong>Action:</strong> ${escapeHtml(med.action_class || 'Not available')}</p>
+                            </div>
+                            <div style="background:#f8fafc;border-radius:10px;padding:9px 11px;border:1px solid #e2e8f0;">
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Manufacturer / Pack</p>
+                                <p style="margin:0 0 3px;font-size:12px;color:#334155;"><strong>Manufacturer:</strong> ${escapeHtml(med.manufacturer || 'Not available')}</p>
+                                <p style="margin:0;font-size:12px;color:#334155;"><strong>Pack:</strong> ${escapeHtml(med.pack_size || 'Not available')}</p>
+                            </div>
+                            <div style="background:#f8fafc;border-radius:10px;padding:9px 11px;border:1px solid #e2e8f0;">
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Medication Note</p>
+                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(med.insight || 'Follow the prescription exactly as provided.')}</p>
+                            </div>
+                        </div>
+                        <div style="margin-top:10px;display:grid;gap:8px;">
+                            <div>
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Substitutes</p>
+                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(safeList(med.substitutes).join(', ') || 'Not available')}</p>
+                            </div>
+                            <div>
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Common Uses</p>
+                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(safeList(med.uses).join(', ') || 'Not available')}</p>
+                            </div>
+                            <div>
+                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Common Side Effects</p>
+                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(safeList(med.side_effects).slice(0, 8).join(', ') || 'Not available')}</p>
+                            </div>
+                        </div>
+                    </section>
+                `).join('')}
+            </div>
+            <section style="margin-top:12px;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;background:#ffffff;">
+                <p style="margin:0 0 6px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">OCR Extract</p>
+                <p style="margin:0;font-size:11px;line-height:1.55;color:#334155;white-space:pre-wrap;">${escapeHtml(data.raw_text || 'No OCR text captured.')}</p>
+            </section>
+            <section style="margin-top:10px;padding-top:6px;font-size:10px;line-height:1.55;color:#64748b;text-align:center;">
+                ${escapeHtml('{{ app_name }}')} generated this summary from OCR and dataset matching. It is not a substitute for a pharmacist or clinician review.
+            </section>
+        `;
+        return reportRoot;
+    }
 
     fileInput.addEventListener('change', function(e) {
         if(e.target.files && e.target.files[0]) {
@@ -271,6 +514,7 @@
             
             const data = await response.json();
             if(!response.ok) throw new Error(data.error || data.detail || "Server Error");
+            lastAnalysis = data;
             
             medicationsContainer.innerHTML = '';
             
@@ -285,6 +529,17 @@
                     clone.querySelector('.med-duration').textContent = med.duration || 'N/A';
                     clone.querySelector('.med-insight').textContent = med.insight || 'Follow doctor\'s instructions carefully.';
                     clone.querySelector('.med-type').textContent = med.type || 'MEDICATION';
+                    clone.querySelector('.med-source').textContent = med.source || 'OCR only';
+                    clone.querySelector('.med-therapeutic').textContent = med.therapeutic_class || med.category || 'Not available';
+                    clone.querySelector('.med-pack').textContent = formatPackAndManufacturer(med);
+                    setText(clone.querySelector('.med-composition'), med.composition);
+                    setText(clone.querySelector('.med-chemical'), med.chemical_class);
+                    setText(clone.querySelector('.med-action'), med.action_class);
+                    renderChips(clone.querySelector('.med-substitutes'), safeList(med.substitutes).slice(0, 6), 'No mapped substitutes');
+                    renderChips(clone.querySelector('.med-uses'), safeList(med.uses), 'No mapped uses');
+                    renderChips(clone.querySelector('.med-effects'), safeList(med.side_effects).slice(0, 6), 'No side-effect snapshot');
+                    const substitutes = safeList(med.substitutes);
+                    clone.querySelector('.med-substitutes-count').textContent = substitutes.length ? `${substitutes.length} mapped` : 'None mapped';
                     const badgeText = (med.name || 'M').slice(0, 2).toUpperCase();
                     clone.querySelector('.med-badge').textContent = badgeText;
                     clone.querySelector('.med-details-link').href = data.analysis_id ? `/details/${data.analysis_id}` : '/history';
@@ -318,15 +573,31 @@
     const downloadReportBtn = document.getElementById('download-report-btn');
     if(downloadReportBtn) {
         downloadReportBtn.addEventListener('click', function() {
-            const resultsAreaToPrint = document.getElementById('results-area');
+            if (!lastAnalysis || !Array.isArray(lastAnalysis.medications) || !lastAnalysis.medications.length) {
+                alert('Run an analysis before downloading the PDF report.');
+                return;
+            }
+
+            const reportNode = createReportNode(lastAnalysis);
+            reportNode.style.position = 'fixed';
+            reportNode.style.left = '-10000px';
+            reportNode.style.top = '0';
+            document.body.appendChild(reportNode);
+
+            const safeName = (lastAnalysis.filename || 'analysis').replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '');
             const opt = {
-                margin:       10,
-                filename:     'SimpliScribe_Report.pdf',
+                margin:       0,
+                filename:     `${safeName || 'analysis'}_report.pdf`,
                 image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2 },
+                html2canvas:  { scale: 2, backgroundColor: '#ffffff' },
                 jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
             };
-            html2pdf().set(opt).from(resultsAreaToPrint).save();
+
+            html2pdf()
+                .set(opt)
+                .from(reportNode)
+                .save()
+                .finally(() => reportNode.remove());
         });
     }
 </script>
