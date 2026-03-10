@@ -9,11 +9,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class Settings:
     app_name: str = os.environ.get("APP_NAME", "SimpliScribe")
     app_env: str = os.environ.get("APP_ENV", "development")
+    root_dir: Path = BASE_DIR
     templates_dir: Path = BASE_DIR / "templates"
     static_dir: Path = BASE_DIR / "static"
     uploads_dir: Path = BASE_DIR / "uploads"
     data_dir: Path = BASE_DIR / "data"
     history_file: Path = BASE_DIR / "data" / "analysis_history.json"
+    india_medicine_dataset: Path = BASE_DIR / "A_Z_medicines_dataset_of_India.csv"
+    medicine_database_dataset: Path = BASE_DIR / "all_medicine databased.csv"
     max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "10"))
     hf_token: str = os.environ.get("HUGGINGFACEHUB_API_TOKEN", "")
     hf_model: str = os.environ.get("HF_CHAT_MODEL", "Qwen/Qwen2.5-7B-Instruct")
