@@ -7,7 +7,7 @@ pinned: false
 
 # SimpliScribe
 
-SimpliScribe is a FastAPI application that extracts text from prescription images or PDFs and turns that OCR output into a structured medication summary.
+SimpliScribe is a FastAPI application that simplifies prescription reading by extracting text from prescription images or PDFs and turning that OCR output into a structured medication summary.
 
 ## Runtime options
 
