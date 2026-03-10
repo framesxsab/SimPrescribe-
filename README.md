@@ -1,3 +1,10 @@
+---
+title: SimpliScribe
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # SimpliScribe
 
 SimpliScribe is a FastAPI application that extracts text from prescription images or PDFs and turns that OCR output into a structured medication summary.
@@ -40,9 +47,41 @@ docker run -p 7860:7860 --env-file .env simpliscribe
 
 This project is ready for a Docker Space.
 
-1. Create a new Hugging Face Space with the Docker SDK.
-2. Push this repository to the Space.
-3. Add the environment variables from `.env.example` in the Space settings.
-4. Expose port `7860`.
+Recommended Space path: `fxsab/simpliscribe`
+
+1. In your Hugging Face account, create a new Space under `fxsab`.
+2. Choose `Docker` as the SDK.
+3. Name the Space `simpliscribe`.
+4. Push this repository to `https://huggingface.co/spaces/fxsab/simpliscribe`.
+5. Add the environment variables from `.env.example` in the Space settings.
+6. Keep `INFERENCE_PROVIDER=fallback` if you want zero model subscription cost.
+
+Example git remote setup:
+
+```bash
+git remote add space https://huggingface.co/spaces/fxsab/simpliscribe
+git push space master
+```
+
+Suggested Space variables:
+
+```env
+APP_NAME=SimpliScribe
+APP_ENV=production
+INFERENCE_PROVIDER=fallback
+HUGGINGFACEHUB_API_TOKEN=
+HF_CHAT_MODEL=Qwen/Qwen2.5-7B-Instruct
+MODEL_API_URL=
+MODEL_API_KEY=
+MAX_UPLOAD_MB=10
+REQUEST_TIMEOUT_SECONDS=60
+```
+
+Expected behavior on Spaces:
+
+- The app is publicly viewable through the Space URL.
+- OCR still runs inside the Space container.
+- No paid model API is required when `INFERENCE_PROVIDER=fallback`.
+- Performance depends on the free CPU resources available to the Space.
 
 For an external hosted model, set `INFERENCE_PROVIDER=endpoint` and point `MODEL_API_URL` at your inference endpoint.
