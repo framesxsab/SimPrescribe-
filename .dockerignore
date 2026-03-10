@@ -1,0 +1,7 @@
+.git
+.venv
+__pycache__
+uploads
+data/analysis_history.json
+archive (3)
+synthetic_prescription_dataset
