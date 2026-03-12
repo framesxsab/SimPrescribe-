@@ -1,0 +1,37 @@
+[
+  {
+    "id": "case-1",
+    "label": "Simple once-daily tablet",
+    "raw_text": "Paracetamol 650 tab od 5 days",
+    "expected_medications": [
+      {
+        "name": "Paracetamol",
+        "type": "Tablet",
+        "dosage": "650 mg",
+        "frequency": "once daily",
+        "duration": "5 days"
+      }
+    ]
+  },
+  {
+    "id": "case-2",
+    "label": "Two-line mixed medicines",
+    "raw_text": "Amoxycillin 500 cap bd 5 days\nCetirizine 10 tab hs 3 days",
+    "expected_medications": [
+      {
+        "name": "Amoxycillin",
+        "type": "Capsule",
+        "dosage": "500 mg",
+        "frequency": "twice daily",
+        "duration": "5 days"
+      },
+      {
+        "name": "Cetirizine",
+        "type": "Tablet",
+        "dosage": "10 mg",
+        "frequency": "at bedtime",
+        "duration": "3 days"
+      }
+    ]
+  }
+]

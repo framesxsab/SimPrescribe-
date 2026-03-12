@@ -7,7 +7,6 @@
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -309,166 +308,6 @@
         return parts.length ? parts.join(' • ') : 'Not available';
     }
 
-    function createReportNode(data) {
-        const reportRoot = document.createElement('div');
-        reportRoot.style.width = '210mm';
-        reportRoot.style.background = '#ffffff';
-        reportRoot.style.color = '#0f172a';
-        reportRoot.style.padding = '10mm';
-        reportRoot.style.fontFamily = 'Inter, sans-serif';
-
-        const meds = Array.isArray(data.medications) ? data.medications : [];
-        const datasets = [...new Set(meds.flatMap(med => safeList(med.source_datasets)))];
-        const generatedAt = new Date().toLocaleString();
-        const analysisCreatedAt = data.created_at ? new Date(data.created_at).toLocaleString() : 'Not available';
-
-        reportRoot.innerHTML = `
-            <section style="page-break-after:always;border:1px solid #dbe4e2;border-radius:16px;overflow:hidden;background:#ffffff;min-height:257mm;display:flex;flex-direction:column;justify-content:space-between;">
-                <div style="background:#f8fafc;color:#0f172a;padding:14px 16px 12px;border-bottom:1px solid #e2e8f0;">
-                    <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#64748b;">${escapeHtml('{{ app_name }}')}</p>
-                    <h1 style="margin:0;font-size:26px;line-height:1.12;font-weight:800;">Prescription Analysis Report</h1>
-                    <p style="margin:8px 0 0;font-size:13px;line-height:1.5;color:#475569;">A structured reading aid generated from OCR extraction and medicine-dataset enrichment.</p>
-                </div>
-                <div style="padding:16px 16px 8px;display:grid;gap:12px;">
-                    <section style="border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px 14px;">
-                        <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">Document Reference</p>
-                        <p style="margin:0 0 10px;font-size:24px;line-height:1.2;font-weight:800;color:#0f172a;word-break:break-word;">${escapeHtml(data.filename || 'Prescription Upload')}</p>
-                        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Analysis ID</p>
-                                <p style="margin:0;font-size:13px;line-height:1.4;color:#0f172a;word-break:break-word;">${escapeHtml(data.analysis_id || data.id || 'Not available')}</p>
-                            </div>
-                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Analysis Created</p>
-                                <p style="margin:0;font-size:13px;line-height:1.4;color:#0f172a;">${escapeHtml(analysisCreatedAt)}</p>
-                            </div>
-                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Report Generated</p>
-                                <p style="margin:0;font-size:13px;line-height:1.4;color:#0f172a;">${escapeHtml(generatedAt)}</p>
-                            </div>
-                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Medication Count</p>
-                                <p style="margin:0;font-size:13px;line-height:1.4;color:#0f172a;">${meds.length}</p>
-                            </div>
-                        </div>
-                    </section>
-                    <section style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-                        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:11px 13px;background:#ffffff;">
-                            <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Data Sources</p>
-                            <p style="margin:0;font-size:13px;line-height:1.55;color:#334155;">${escapeHtml(datasets.join(', ') || 'OCR only')}</p>
-                        </div>
-                        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:11px 13px;background:#ffffff;">
-                            <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Report Scope</p>
-                            <p style="margin:0;font-size:13px;line-height:1.55;color:#334155;">Medication instructions, reference matches, substitutes, uses, and common side effects when available.</p>
-                        </div>
-                    </section>
-                </div>
-                <div style="padding:0 16px 16px;display:grid;gap:10px;">
-                    <div style="border-top:1px solid #e2e8f0;padding-top:10px;">
-                        <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Important Note</p>
-                        <p style="margin:0;font-size:12px;line-height:1.65;color:#475569;">This document is a structured summary for review. It should be checked against the original prescription, pharmacist guidance, and clinician instructions before use.</p>
-                    </div>
-                </div>
-            </section>
-            <div style="border:1px solid #dbe4e2;border-radius:18px;overflow:hidden;">
-                <div style="background:#f8fafc;color:#0f172a;padding:12px 14px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:1px solid #e2e8f0;">
-                    <div>
-                        <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">${escapeHtml('{{ app_name }}')}</p>
-                        <h1 style="margin:0;font-size:23px;line-height:1.15;font-weight:800;">Prescription Analysis Report</h1>
-                        <p style="margin:6px 0 0;font-size:12px;color:#475569;">Structured OCR output enriched with dataset-backed medicine references.</p>
-                    </div>
-                    <div style="text-align:right;font-size:11px;line-height:1.55;min-width:170px;color:#334155;">
-                        <p style="margin:0;"><strong>Report ID:</strong> ${escapeHtml(data.analysis_id || data.id || 'Not available')}</p>
-                        <p style="margin:0;"><strong>Generated:</strong> ${escapeHtml(generatedAt)}</p>
-                        <p style="margin:0;"><strong>Analysis Time:</strong> ${escapeHtml(analysisCreatedAt)}</p>
-                    </div>
-                </div>
-                <div style="padding:12px 14px;background:#f8fafc;display:grid;grid-template-columns:1.15fr 0.85fr;gap:10px;align-items:start;">
-                    <div>
-                        <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">Document</p>
-                        <p style="margin:0;font-size:19px;font-weight:800;color:#0f172a;line-height:1.18;">${escapeHtml(data.filename || 'Prescription Upload')}</p>
-                        <p style="margin:6px 0 0;font-size:11px;line-height:1.5;color:#475569;">This report is intended as a structured reading aid and should be cross-checked against the original prescription.</p>
-                    </div>
-                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;">
-                        <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Summary</p>
-                        <p style="margin:0 0 4px;font-size:12px;"><strong>Medications:</strong> ${meds.length}</p>
-                        <p style="margin:0 0 4px;font-size:12px;"><strong>Datasets:</strong> ${escapeHtml(datasets.join(', ') || 'OCR only')}</p>
-                        <p style="margin:0;font-size:12px;"><strong>OCR Text:</strong> ${data.raw_text ? 'Captured' : 'Unavailable'}</p>
-                    </div>
-                </div>
-            </div>
-            <div style="margin-top:10px;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;background:#ffffff;">
-                <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Interpretation Notes</p>
-                <ul style="margin:0;padding-left:16px;font-size:11px;line-height:1.55;color:#334155;">
-                    <li>Instruction fields such as dosage, frequency, and duration come from OCR extraction and post-processing.</li>
-                    <li>Reference fields such as composition, classes, uses, substitutes, and side effects come from the two linked medicine datasets when a match is found.</li>
-                    <li>Ambiguous medicines should be verified manually against the original prescription and packaging.</li>
-                </ul>
-            </div>
-            <div style="margin-top:10px;display:grid;gap:10px;">
-                ${meds.map((med, index) => `
-                    <section style="page-break-inside:avoid;border:1px solid #dbe4e2;border-radius:14px;padding:12px;background:#ffffff;">
-                        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:1px solid #ecf0ef;padding-bottom:10px;">
-                            <div>
-                                <p style="margin:0 0 5px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Medication ${index + 1}</p>
-                                <h2 style="margin:0 0 6px;font-size:19px;line-height:1.15;">${escapeHtml(med.name)}</h2>
-                                <p style="margin:0;font-size:12px;color:#475569;">${escapeHtml(med.category || 'General')} • ${escapeHtml(med.type || 'Medication')} • ${escapeHtml(med.source || 'OCR only')}</p>
-                            </div>
-                            <div style="text-align:right;font-size:12px;line-height:1.45;color:#0f172a;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;min-width:165px;">
-                                <p style="margin:0 0 3px;"><strong>Dosage:</strong> ${escapeHtml(med.dosage || 'N/A')}</p>
-                                <p style="margin:0 0 3px;"><strong>Frequency:</strong> ${escapeHtml(med.frequency || 'N/A')}</p>
-                                <p style="margin:0;"><strong>Duration:</strong> ${escapeHtml(med.duration || 'N/A')}</p>
-                            </div>
-                        </div>
-                        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px;">
-                            <div style="background:#f8fafc;border-radius:10px;padding:9px 11px;border:1px solid #e2e8f0;">
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Composition</p>
-                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(med.composition || 'Not available')}</p>
-                            </div>
-                            <div style="background:#f8fafc;border-radius:10px;padding:9px 11px;border:1px solid #e2e8f0;">
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Therapeutic / Reference</p>
-                                <p style="margin:0 0 3px;font-size:12px;color:#334155;"><strong>Therapeutic:</strong> ${escapeHtml(med.therapeutic_class || 'Not available')}</p>
-                                <p style="margin:0 0 3px;font-size:12px;color:#334155;"><strong>Chemical:</strong> ${escapeHtml(med.chemical_class || 'Not available')}</p>
-                                <p style="margin:0;font-size:12px;color:#334155;"><strong>Action:</strong> ${escapeHtml(med.action_class || 'Not available')}</p>
-                            </div>
-                            <div style="background:#f8fafc;border-radius:10px;padding:9px 11px;border:1px solid #e2e8f0;">
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Manufacturer / Pack</p>
-                                <p style="margin:0 0 3px;font-size:12px;color:#334155;"><strong>Manufacturer:</strong> ${escapeHtml(med.manufacturer || 'Not available')}</p>
-                                <p style="margin:0;font-size:12px;color:#334155;"><strong>Pack:</strong> ${escapeHtml(med.pack_size || 'Not available')}</p>
-                            </div>
-                            <div style="background:#f8fafc;border-radius:10px;padding:9px 11px;border:1px solid #e2e8f0;">
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Medication Note</p>
-                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(med.insight || 'Follow the prescription exactly as provided.')}</p>
-                            </div>
-                        </div>
-                        <div style="margin-top:10px;display:grid;gap:8px;">
-                            <div>
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Substitutes</p>
-                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(safeList(med.substitutes).join(', ') || 'Not available')}</p>
-                            </div>
-                            <div>
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Common Uses</p>
-                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(safeList(med.uses).join(', ') || 'Not available')}</p>
-                            </div>
-                            <div>
-                                <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">Common Side Effects</p>
-                                <p style="margin:0;font-size:12px;line-height:1.45;color:#334155;">${escapeHtml(safeList(med.side_effects).slice(0, 8).join(', ') || 'Not available')}</p>
-                            </div>
-                        </div>
-                    </section>
-                `).join('')}
-            </div>
-            <section style="margin-top:12px;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;background:#ffffff;">
-                <p style="margin:0 0 6px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#64748b;">OCR Extract</p>
-                <p style="margin:0;font-size:11px;line-height:1.55;color:#334155;white-space:pre-wrap;">${escapeHtml(data.raw_text || 'No OCR text captured.')}</p>
-            </section>
-            <section style="margin-top:10px;padding-top:6px;font-size:10px;line-height:1.55;color:#64748b;text-align:center;">
-                ${escapeHtml('{{ app_name }}')} generated this summary from OCR and dataset matching. It is not a substitute for a pharmacist or clinician review.
-            </section>
-        `;
-        return reportRoot;
-    }
-
     fileInput.addEventListener('change', function(e) {
         if(e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
@@ -572,32 +411,49 @@
 
     const downloadReportBtn = document.getElementById('download-report-btn');
     if(downloadReportBtn) {
-        downloadReportBtn.addEventListener('click', function() {
-            if (!lastAnalysis || !Array.isArray(lastAnalysis.medications) || !lastAnalysis.medications.length) {
+        downloadReportBtn.addEventListener('click', async function() {
+            const analysisId = lastAnalysis && (lastAnalysis.analysis_id || lastAnalysis.id);
+            if (!analysisId) {
                 alert('Run an analysis before downloading the PDF report.');
                 return;
             }
+            const originalLabel = downloadReportBtn.innerHTML;
+            downloadReportBtn.disabled = true;
+            downloadReportBtn.classList.add('opacity-60', 'cursor-not-allowed');
+            downloadReportBtn.innerHTML = 'Preparing PDF<span class="material-symbols-outlined text-sm">hourglass_top</span>';
 
-            const reportNode = createReportNode(lastAnalysis);
-            reportNode.style.position = 'fixed';
-            reportNode.style.left = '-10000px';
-            reportNode.style.top = '0';
-            document.body.appendChild(reportNode);
+            try {
+                const response = await fetch(`/api/report/${encodeURIComponent(analysisId)}`);
+                if (!response.ok) {
+                    const message = await response.text();
+                    throw new Error(message || 'PDF generation failed.');
+                }
 
-            const safeName = (lastAnalysis.filename || 'analysis').replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '');
-            const opt = {
-                margin:       0,
-                filename:     `${safeName || 'analysis'}_report.pdf`,
-                image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2, backgroundColor: '#ffffff' },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
-
-            html2pdf()
-                .set(opt)
-                .from(reportNode)
-                .save()
-                .finally(() => reportNode.remove());
+                const blob = await response.blob();
+                const contentDisposition = response.headers.get('Content-Disposition') || '';
+                const encodedNameMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+                const quotedNameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+                const serverFileName = encodedNameMatch
+                    ? decodeURIComponent(encodedNameMatch[1])
+                    : (quotedNameMatch ? quotedNameMatch[1] : '');
+                const fileName = serverFileName || `${(lastAnalysis.filename || 'analysis').replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'analysis'}_report.pdf`;
+                const pdfBlob = blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' });
+                const url = URL.createObjectURL(pdfBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (error) {
+                console.error('PDF export failed.', error);
+                alert('The PDF could not be generated. Please try again.');
+            } finally {
+                downloadReportBtn.disabled = false;
+                downloadReportBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+                downloadReportBtn.innerHTML = originalLabel;
+            }
         });
     }
 </script>
