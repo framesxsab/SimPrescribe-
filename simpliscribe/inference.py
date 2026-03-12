@@ -33,6 +33,8 @@ FORM_MAP = {
     "drops": "drops",
 }
 
+FORM_PATTERN = r"tab(?:s)?|tablet|cap(?:s)?|capsule|syp|syr|syrup|susp|suspension|inj|injection|cream|ointment|drops"
+
 FREQUENCY_MAP = {
     "od": "once daily",
     "bd": "twice daily",
@@ -60,6 +62,17 @@ STOP_TOKENS = set(FREQUENCY_MAP) | set(MEAL_MAP) | {
     "night",
 }
 
+GENERIC_NAME_TOKENS = set(FORM_MAP) | {
+    "medicine",
+    "medication",
+    "oral",
+    "strip",
+    "vial",
+    "bottle",
+    "pack",
+    "of",
+}
+
 
 @dataclass(frozen=True)
 class MedicineEntry:
@@ -84,6 +97,64 @@ def normalize_text(value: str) -> str:
 
 def title_case(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().title()
+
+
+def canonicalize_medicine_name(value: str) -> str:
+    tokens = [token for token in re.split(r"\s+", str(value or "").strip()) if token]
+    while tokens:
+        normalized = normalize_text(tokens[-1])
+        if not normalized:
+            tokens.pop()
+            continue
+        if normalized in GENERIC_NAME_TOKENS or re.fullmatch(r"\d+(?:\.\d+)?(?:mg|ml|mcg|g)?", normalized):
+            tokens.pop()
+            continue
+        break
+    cleaned = " ".join(tokens)
+    return title_case(cleaned or str(value or "").strip())
+
+
+def extract_candidate_name(segment: str) -> str:
+    tokens: list[str] = []
+    for token in re.split(r"\s+", segment):
+        normalized = normalize_text(token)
+        if not normalized:
+            continue
+        if normalized in FORM_MAP or normalized in STOP_TOKENS:
+            continue
+        if re.fullmatch(r"\d+(?:mg|ml|mcg|g)?", normalized):
+            break
+        if re.fullmatch(r"[01]-[01]-[01]", normalized):
+            break
+        tokens.append(token)
+        if len(tokens) == 3:
+            break
+    return canonicalize_medicine_name(" ".join(tokens)) if tokens else "Unknown medication"
+
+
+def build_match_candidates(value: str) -> list[str]:
+    normalized = normalize_text(value)
+    if not normalized:
+        return []
+
+    tokens = [
+        token
+        for token in normalized.split()
+        if token not in FORM_MAP
+        and token not in STOP_TOKENS
+        and not re.fullmatch(r"\d+(?:mg|ml|mcg|g)?", token)
+        and not re.fullmatch(r"[01]-[01]-[01]", token)
+    ]
+    if not tokens:
+        return []
+
+    candidates: list[str] = []
+    max_size = min(4, len(tokens))
+    for size in range(max_size, 0, -1):
+        candidate = " ".join(tokens[:size])
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
 
 
 def compact_composition(*parts: str) -> str:
@@ -228,39 +299,46 @@ def find_best_medicine_match(segment: str) -> MedicineEntry | None:
     if not lexicon:
         return None
 
-    normalized_segment = normalize_text(segment)
-    if not normalized_segment:
+    candidates = build_match_candidates(segment)
+    if not candidates:
         return None
 
-    tokens = normalized_segment.split()
-    for size in range(min(5, len(tokens)), 0, -1):
-        for start in range(0, len(tokens) - size + 1):
-            candidate = " ".join(tokens[start : start + size])
-            if candidate in lexicon:
-                return lexicon[candidate]
+    for candidate in candidates:
+        if candidate in lexicon:
+            return lexicon[candidate]
 
     best_entry: MedicineEntry | None = None
     best_score = 0.0
-    candidates = tokens[:4]
-    for size in range(len(candidates), 0, -1):
-        candidate = " ".join(candidates[:size])
+    for candidate in candidates:
         for alias, entry in lexicon.items():
             score = SequenceMatcher(None, candidate, alias).ratio()
             if score > best_score:
                 best_score = score
                 best_entry = entry
 
-    return best_entry if best_score >= 0.86 else None
+    return best_entry if best_score >= 0.92 else None
 
 
 def split_segments(raw_text: str) -> list[str]:
-    cleaned = re.sub(r"\s+", " ", raw_text.replace("\r", " ")).strip()
-    chunks = re.split(r"(?:(?<=\b(?:tab|cap|syp|syrup|inj|cream)\b)|[\n;]+)", cleaned, flags=re.IGNORECASE)
+    normalized = raw_text.replace("\r", "\n")
+    normalized = re.sub(r"[ \t]+", " ", normalized).strip()
+    if not normalized:
+        return []
+
+    chunks = [chunk.strip(" ,.-") for chunk in re.split(r"(?:\n+|;|•)", normalized) if chunk.strip(" ,.-")]
+    if len(chunks) > 1:
+        return chunks
+
+    cleaned = re.sub(r"\s+", " ", normalized)
+    chunks = re.split(
+        rf"\s+(?=(?:[A-Z][A-Za-z0-9.+/-]*(?:\s+[A-Z0-9][A-Za-z0-9.+/-]*){{0,3}}\s+(?:{FORM_PATTERN})\b))",
+        cleaned,
+    )
     return [chunk.strip(" ,.-") for chunk in chunks if chunk.strip(" ,.-")]
 
 
 def extract_form(segment: str) -> str:
-    match = re.search(r"\b(tab(?:s)?|tablet|cap(?:s)?|capsule|syp|syr|syrup|susp|suspension|inj|injection|cream|ointment|drops)\b", segment, flags=re.IGNORECASE)
+    match = re.search(rf"\b({FORM_PATTERN})\b", segment, flags=re.IGNORECASE)
     if not match:
         return "Medication"
     return FORM_MAP.get(match.group(1).lower(), "Medication").title()
@@ -317,24 +395,12 @@ def extract_frequency(segment: str) -> str:
 
 
 def derive_name(segment: str, entry: MedicineEntry | None) -> str:
+    derived_name = extract_candidate_name(segment)
+    if derived_name != "Unknown medication":
+        return derived_name
     if entry is not None:
-        return entry.name
-
-    tokens = []
-    for token in re.split(r"\s+", segment):
-        normalized = normalize_text(token)
-        if not normalized:
-            continue
-        if normalized in FORM_MAP or normalized in STOP_TOKENS:
-            continue
-        if re.fullmatch(r"\d+(?:mg|ml|mcg|g)?", normalized):
-            break
-        if re.fullmatch(r"[01]-[01]-[01]", normalized):
-            break
-        tokens.append(token)
-        if len(tokens) == 3:
-            break
-    return title_case(" ".join(tokens) or "Unknown medication")
+        return canonicalize_medicine_name(entry.name)
+    return "Unknown medication"
 
 
 def build_insight(entry: MedicineEntry | None, frequency: str, duration: str, form: str) -> str:
@@ -384,6 +450,120 @@ def dataset_payload(entry: MedicineEntry | None) -> dict[str, Any]:
     }
 
 
+def normalize_medication_type(value: str, entry: MedicineEntry | None = None) -> str:
+    normalized = normalize_text(value)
+    type_map = {
+        "tab": "Tablet",
+        "tabs": "Tablet",
+        "tablet": "Tablet",
+        "tablets": "Tablet",
+        "tabular": "Tablet",
+        "cap": "Capsule",
+        "caps": "Capsule",
+        "capsule": "Capsule",
+        "capsules": "Capsule",
+        "syr": "Syrup",
+        "syp": "Syrup",
+        "syrup": "Syrup",
+        "susp": "Suspension",
+        "suspension": "Suspension",
+        "inj": "Injection",
+        "injection": "Injection",
+        "cream": "Cream",
+        "ointment": "Ointment",
+        "drops": "Drops",
+        "drop": "Drops",
+        "medication": "Medication",
+        "medicine": "Medication",
+    }
+    if normalized in type_map:
+        return type_map[normalized]
+
+    if entry and entry.dosage_form:
+        entry_type = normalize_medication_type(entry.dosage_form)
+        if entry_type != "Medication":
+            return entry_type
+
+    return "Medication"
+
+
+def normalize_frequency_value(value: str) -> str:
+    text = clean_value(value)
+    normalized = normalize_text(text)
+    if not normalized:
+        return "Refer to prescription"
+
+    for shorthand, expanded in FREQUENCY_MAP.items():
+        if normalized == shorthand:
+            return expanded
+
+    canonical_patterns = {
+        r"once (a|per)? day|daily|every day|1x day": "once daily",
+        r"twice (a|per)? day|2x day|two times daily": "twice daily",
+        r"three times daily|thrice daily|3x day": "three times daily",
+        r"four times daily|4x day": "four times daily",
+        r"at bedtime|bedtime|hs": "at bedtime",
+        r"as needed|when needed|prn|sos": "as needed",
+        r"immediately|stat": "immediately",
+    }
+    for pattern, replacement in canonical_patterns.items():
+        if re.fullmatch(pattern, normalized):
+            return replacement
+
+    timing_match = re.fullmatch(r"([01]-[01]-[01])", normalized)
+    if timing_match:
+        pattern = timing_match.group(1)
+        timing_map = {
+            "1-0-0": "once daily in the morning",
+            "0-1-0": "once daily in the afternoon",
+            "0-0-1": "once daily at night",
+            "1-0-1": "twice daily",
+            "1-1-0": "twice daily",
+            "0-1-1": "twice daily",
+            "1-1-1": "three times daily",
+        }
+        return timing_map.get(pattern, "Refer to prescription")
+
+    return text or "Refer to prescription"
+
+
+def normalize_duration_value(value: str) -> str:
+    text = clean_value(value)
+    normalized = normalize_text(text)
+    if not normalized or normalized in {"na", "n a", "none", "unknown"}:
+        return "N/A"
+
+    match = re.search(r"(\d+)\s*(day|days|d|week|weeks|w)", normalized)
+    if not match:
+        return text or "N/A"
+
+    amount = match.group(1)
+    unit = match.group(2)
+    if unit in {"day", "days", "d"}:
+        return f"{amount} day" if amount == "1" else f"{amount} days"
+    return f"{amount} week" if amount == "1" else f"{amount} weeks"
+
+
+def normalize_dosage_value(value: str, medication_type: str) -> str:
+    text = clean_value(value)
+    if not text:
+        return "N/A"
+
+    strength_match = re.search(r"\b\d+(?:\.\d+)?\s?(?:mg|ml|mcg|g)\b", text, flags=re.IGNORECASE)
+    if strength_match:
+        return strength_match.group(0).replace("  ", " ")
+
+    count_match = re.search(r"\b\d+(?:\.\d+)?\s?(?:tablet|tablets|capsule|capsules|drop|drops|puff|puffs)\b", text, flags=re.IGNORECASE)
+    if count_match:
+        return count_match.group(0).replace("  ", " ")
+
+    bare_number = re.fullmatch(r"\d{2,4}", normalize_text(text))
+    if bare_number and medication_type in {"Tablet", "Capsule"}:
+        return f"{bare_number.group(0)} mg"
+
+    return text
+
+
 def build_medication_record(
     *,
     name: str,
@@ -399,13 +579,18 @@ def build_medication_record(
     if resolved_category.lower() == "general" and entry and entry.category:
         resolved_category = entry.category.title()
 
+    normalized_type = normalize_medication_type(medication_type, entry)
+    normalized_frequency = normalize_frequency_value(frequency)
+    normalized_duration = normalize_duration_value(duration)
+    normalized_dosage = normalize_dosage_value(dosage, normalized_type)
+
     payload = {
         "name": name.strip() or "Unknown medication",
         "category": resolved_category,
-        "type": medication_type.strip() or "Medication",
-        "dosage": dosage.strip() or "N/A",
-        "frequency": frequency.strip() or "N/A",
-        "duration": duration.strip() or "N/A",
+        "type": normalized_type,
+        "dosage": normalized_dosage,
+        "frequency": normalized_frequency,
+        "duration": normalized_duration,
         "insight": insight.strip() or DEFAULT_INSIGHT,
     }
     payload.update(dataset_payload(entry))
@@ -416,6 +601,21 @@ def build_structuring_prompt(raw_text: str) -> str:
     return f"""
 You are extracting structured medication information from OCR text.
 Return only valid JSON using the schema below.
+
+Rules:
+- Return a JSON object, not an array.
+- Use the key `medications` exactly.
+- Do not include markdown, comments, or explanation text.
+- Do not invent medicines that are not present in the OCR text.
+- Split multiple medicines into separate objects.
+- Keep `dosage` to strength or amount only, for example `650 mg`, `5 ml`, `1 tablet`.
+- Do not put schedule or duration inside `dosage`.
+- `type` must be one of: `Tablet`, `Capsule`, `Syrup`, `Suspension`, `Injection`, `Cream`, `Ointment`, `Drops`, `Medication`.
+- `frequency` should be short, for example `once daily`, `twice daily`, `three times daily`, `at bedtime`, `as needed`, or `Refer to prescription`.
+- `duration` should be short, for example `5 days`, `1 week`, or `N/A`.
+- `category` should be brief. If unknown, use `General`.
+- `insight` must be one short safety note. If unclear, use `Follow the prescription exactly as written.`
+- If a field is unclear, prefer `N/A`, `General`, `Medication`, or `Refer to prescription` instead of guessing.
 
 OCR Text:
 ---
@@ -435,6 +635,24 @@ Schema:
       "insight": "one short safety note"
     }}
   ]
+}}
+
+Example:
+OCR Text: `Paracetamol 650 tab od 5 days`
+
+Output:
+{{
+    "medications": [
+        {{
+            "name": "Paracetamol",
+            "category": "General",
+            "type": "Tablet",
+            "dosage": "650 mg",
+            "frequency": "once daily",
+            "duration": "5 days",
+            "insight": "Follow the prescription exactly as written."
+        }}
+    ]
 }}
 """.strip()
 
@@ -526,7 +744,8 @@ def fallback_extract(raw_text: str) -> list[dict[str, Any]]:
     candidates = split_segments(raw_text)
     medications: list[dict[str, Any]] = []
     for segment in candidates[:6]:
-        entry = find_best_medicine_match(segment)
+        derived_name = extract_candidate_name(segment)
+        entry = find_best_medicine_match(derived_name if derived_name != "Unknown medication" else segment)
         dosage_form = extract_form(segment)
         duration = extract_duration(segment)
         frequency = extract_frequency(segment)

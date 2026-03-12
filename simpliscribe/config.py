@@ -23,7 +23,14 @@ class Settings:
     inference_provider: str = os.environ.get("INFERENCE_PROVIDER", "huggingface")
     model_api_url: str = os.environ.get("MODEL_API_URL", "")
     model_api_key: str = os.environ.get("MODEL_API_KEY", "")
-    request_timeout_seconds: float = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "60"))
+    request_timeout_seconds: float = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "300"))
+    ocr_language: str = os.environ.get("OCR_LANGUAGE", "en")
+    ocr_use_gpu: bool = os.environ.get("OCR_USE_GPU", "false").strip().lower() in {"1", "true", "yes", "on"}
+    local_model_id: str = os.environ.get("LOCAL_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct")
+    local_model_device: str = os.environ.get("LOCAL_MODEL_DEVICE", "auto")
+    local_model_temperature: float = float(os.environ.get("LOCAL_MODEL_TEMPERATURE", "0.1"))
+    local_model_max_new_tokens: int = int(os.environ.get("LOCAL_MODEL_MAX_NEW_TOKENS", "256"))
+    local_model_trust_remote_code: bool = os.environ.get("LOCAL_MODEL_TRUST_REMOTE_CODE", "false").strip().lower() in {"1", "true", "yes", "on"}
 
     @property
     def max_upload_bytes(self) -> int:
