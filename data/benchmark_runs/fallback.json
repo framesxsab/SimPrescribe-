@@ -1,0 +1,238 @@
+{
+  "generated_at": "2026-03-12T06:22:07.478308+00:00",
+  "case_count": 2,
+  "success_count": 2,
+  "failure_count": 0,
+  "average_score": 1.0,
+  "cases": [
+    {
+      "id": "case-1",
+      "label": "Simple once-daily tablet",
+      "score": 1.0,
+      "matched_fields": 5,
+      "total_fields": 5,
+      "expected_count": 1,
+      "actual_count": 1,
+      "source_kind": "text",
+      "source_path": "",
+      "raw_text": "Paracetamol 650 tab od 5 days",
+      "actual": [
+        {
+          "name": "Paracetamol",
+          "category": "Allopathy",
+          "type": "Tablet",
+          "dosage": "650 mg",
+          "frequency": "once daily",
+          "duration": "5 days",
+          "insight": "Contains Paracetamol (500mg). Take once daily for 5 days.",
+          "source": "India Medicines Dataset, Medicine Database",
+          "source_datasets": [
+            "India Medicines Dataset",
+            "Medicine Database"
+          ],
+          "composition": "Paracetamol (500mg)",
+          "manufacturer": "Modi Lifecare Industries Ltd",
+          "pack_size": "strip of 10 tablets",
+          "therapeutic_class": "PAIN ANALGESICS",
+          "chemical_class": "P-Aminophenol Derivative",
+          "action_class": "Analgesic & Antipyretic-PCM",
+          "substitutes": [
+            "Calpol 500mg Tablet",
+            "Dolo 500 Tablet",
+            "Pacimol 500 Tablet",
+            "T-98 Tablet",
+            "Parazex 500mg Tablet"
+          ],
+          "uses": [
+            "Pain relief",
+            "Treatment of Fever"
+          ],
+          "side_effects": [
+            "Stomach pain",
+            "Nausea",
+            "Vomiting"
+          ]
+        }
+      ],
+      "field_results": [
+        {
+          "medication_index": 0,
+          "field": "name",
+          "matched": true,
+          "expected": "Paracetamol",
+          "actual": "Paracetamol"
+        },
+        {
+          "medication_index": 0,
+          "field": "type",
+          "matched": true,
+          "expected": "Tablet",
+          "actual": "Tablet"
+        },
+        {
+          "medication_index": 0,
+          "field": "dosage",
+          "matched": true,
+          "expected": "650 mg",
+          "actual": "650 mg"
+        },
+        {
+          "medication_index": 0,
+          "field": "frequency",
+          "matched": true,
+          "expected": "once daily",
+          "actual": "once daily"
+        },
+        {
+          "medication_index": 0,
+          "field": "duration",
+          "matched": true,
+          "expected": "5 days",
+          "actual": "5 days"
+        }
+      ],
+      "error": ""
+    },
+    {
+      "id": "case-2",
+      "label": "Two-line mixed medicines",
+      "score": 1.0,
+      "matched_fields": 10,
+      "total_fields": 10,
+      "expected_count": 2,
+      "actual_count": 2,
+      "source_kind": "text",
+      "source_path": "",
+      "raw_text": "Amoxycillin 500 cap bd 5 days\nCetirizine 10 tab hs 3 days",
+      "actual": [
+        {
+          "name": "Amoxycillin",
+          "category": "General",
+          "type": "Capsule",
+          "dosage": "500 mg",
+          "frequency": "twice daily",
+          "duration": "5 days",
+          "insight": "Take twice daily for 5 days.",
+          "source": "OCR only",
+          "source_datasets": [],
+          "composition": "",
+          "manufacturer": "",
+          "pack_size": "",
+          "therapeutic_class": "",
+          "chemical_class": "",
+          "action_class": "",
+          "substitutes": [],
+          "uses": [],
+          "side_effects": []
+        },
+        {
+          "name": "Cetirizine",
+          "category": "Allopathy",
+          "type": "Tablet",
+          "dosage": "10 mg",
+          "frequency": "at bedtime",
+          "duration": "3 days",
+          "insight": "Contains Cetirizine (10mg). Take at bedtime for 3 days.",
+          "source": "India Medicines Dataset, Medicine Database",
+          "source_datasets": [
+            "India Medicines Dataset",
+            "Medicine Database"
+          ],
+          "composition": "Cetirizine (10mg)",
+          "manufacturer": "Knoll Pharmaceuticals Ltd",
+          "pack_size": "strip of 10 tablets",
+          "therapeutic_class": "RESPIRATORY",
+          "chemical_class": "Phenylmethyl Piperazinyl Derivative",
+          "action_class": "H1 Antihistaminics (second Generation)",
+          "substitutes": [
+            "Dio 1 10mg Tablet",
+            "Leecet Tablet",
+            "Okacet Tablet",
+            "Cetcip Tablet",
+            "Mast 1 Tablet"
+          ],
+          "uses": [
+            "Treatment of Allergic conditions"
+          ],
+          "side_effects": [
+            "Sleepiness",
+            "Dizziness"
+          ]
+        }
+      ],
+      "field_results": [
+        {
+          "medication_index": 0,
+          "field": "name",
+          "matched": true,
+          "expected": "Amoxycillin",
+          "actual": "Amoxycillin"
+        },
+        {
+          "medication_index": 0,
+          "field": "type",
+          "matched": true,
+          "expected": "Capsule",
+          "actual": "Capsule"
+        },
+        {
+          "medication_index": 0,
+          "field": "dosage",
+          "matched": true,
+          "expected": "500 mg",
+          "actual": "500 mg"
+        },
+        {
+          "medication_index": 0,
+          "field": "frequency",
+          "matched": true,
+          "expected": "twice daily",
+          "actual": "twice daily"
+        },
+        {
+          "medication_index": 0,
+          "field": "duration",
+          "matched": true,
+          "expected": "5 days",
+          "actual": "5 days"
+        },
+        {
+          "medication_index": 1,
+          "field": "name",
+          "matched": true,
+          "expected": "Cetirizine",
+          "actual": "Cetirizine"
+        },
+        {
+          "medication_index": 1,
+          "field": "type",
+          "matched": true,
+          "expected": "Tablet",
+          "actual": "Tablet"
+        },
+        {
+          "medication_index": 1,
+          "field": "dosage",
+          "matched": true,
+          "expected": "10 mg",
+          "actual": "10 mg"
+        },
+        {
+          "medication_index": 1,
+          "field": "frequency",
+          "matched": true,
+          "expected": "at bedtime",
+          "actual": "at bedtime"
+        },
+        {
+          "medication_index": 1,
+          "field": "duration",
+          "matched": true,
+          "expected": "3 days",
+          "actual": "3 days"
+        }
+      ],
+      "error": ""
+    }
+  ]
+}

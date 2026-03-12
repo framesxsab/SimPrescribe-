@@ -9,6 +9,44 @@ pinned: false
 
 SimpliScribe is a FastAPI application that simplifies prescription reading by extracting text from prescription images or PDFs and turning that OCR output into a structured medication summary.
 
+## Open-source local stack
+
+- OCR runs locally with PaddleOCR.
+- Medication structuring can run with `INFERENCE_PROVIDER=fallback` or a self-hosted endpoint via `INFERENCE_PROVIDER=endpoint`.
+- No external paid API is required if you keep OCR local and point the endpoint mode at your own deployed model.
+
+## Local model server
+
+This repo includes a separate local model server that you can run on your own laptop and point the main app to.
+
+Install the optional model-serving dependencies:
+
+```bash
+pip install -r requirements-local-model.txt
+```
+
+Start the model server on port `8001`:
+
+```bash
+uvicorn simpliscribe.local_model_server:app --host 127.0.0.1 --port 8001
+```
+
+Then point the main app at that local endpoint:
+
+```env
+INFERENCE_PROVIDER=endpoint
+MODEL_API_URL=http://127.0.0.1:8001/extract
+LOCAL_MODEL_ID=Qwen/Qwen2.5-1.5B-Instruct
+LOCAL_MODEL_DEVICE=auto
+LOCAL_MODEL_TEMPERATURE=0.1
+LOCAL_MODEL_MAX_NEW_TOKENS=256
+```
+
+The default local model is intentionally small enough to be more realistic on consumer hardware. If you have a stronger GPU, you can raise `LOCAL_MODEL_ID` to a larger open model.
+
+For a 6 GB GPU, `Qwen/Qwen2.5-1.5B-Instruct` is the recommended default starting point before trying larger models.
+The first request can take a few minutes because model weights may need to download and load into memory, so the default endpoint timeout is intentionally longer for local use.
+
 ## Runtime options
 
 - `INFERENCE_PROVIDER=fallback`
@@ -28,6 +66,17 @@ copy .env.example .env
 uvicorn app:app --reload
 ```
 
+Recommended local environment variables for a fully self-hosted setup:
+
+```env
+INFERENCE_PROVIDER=endpoint
+MODEL_API_URL=http://127.0.0.1:8001/extract
+OCR_LANGUAGE=en
+OCR_USE_GPU=false
+```
+
+If you do not want to run the local model server yet, keep `INFERENCE_PROVIDER=fallback` and the app will stay fully local with rule-based extraction only.
+
 Open `http://127.0.0.1:8000`.
 
 ## Testing
@@ -35,6 +84,63 @@ Open `http://127.0.0.1:8000`.
 ```bash
 pytest
 ```
+
+## Benchmarking
+
+You can benchmark extraction quality locally against curated OCR text cases or full image/PDF cases.
+
+Run the benchmark with the current provider configuration:
+
+```bash
+python -m simpliscribe.benchmark --cases data/benchmark_cases.sample.json
+```
+
+This writes a JSON report to `data/benchmark_runs/latest.json` and prints a summary score in the terminal.
+
+Case files support either:
+
+- `raw_text`: benchmark only the structuring stage
+- `file_path`: benchmark the full OCR + structuring pipeline
+- `.parquet` with a `ground_truth` column: auto-converted into synthetic prescription benchmark cases
+
+Parquet input requires `pandas` and `pyarrow` in the active environment.
+
+Example parquet benchmark run:
+
+```bash
+python -m simpliscribe.benchmark --cases 0000.parquet --limit 25 --output data/benchmark_runs/parquet_0000.json
+```
+
+Use `--limit` while iterating on larger parquet datasets so the benchmark stays fast enough to compare fallback and endpoint modes.
+
+Example file-based case shape:
+
+```json
+[
+  {
+    "id": "scan-1",
+    "label": "Prescription image",
+    "file_path": "../uploads/prescription.png",
+    "expected_medications": [
+      {
+        "name": "Paracetamol",
+        "type": "Tablet",
+        "dosage": "650 mg",
+        "frequency": "once daily",
+        "duration": "5 days"
+      }
+    ]
+  }
+]
+```
+
+Recommended workflow:
+
+1. Add real OCR text samples to `data/benchmark_cases.sample.json` or a separate JSON file.
+2. Add file-based cases when you want to measure OCR and structuring together.
+3. Run once with `INFERENCE_PROVIDER=fallback`.
+4. Run again with `INFERENCE_PROVIDER=endpoint` and your local model server.
+5. Compare the saved benchmark reports before changing prompts or models.
 
 ## Docker deployment
 

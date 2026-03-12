@@ -1,14 +1,42 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
-import easyocr
 import fitz
 from PIL import Image
 
+from .config import settings
+
+
+def _collect_paddle_text(results: Any) -> list[str]:
+    segments: list[str] = []
+    if not isinstance(results, list):
+        return segments
+
+    for page_result in results:
+        if not isinstance(page_result, list):
+            continue
+        for line in page_result:
+            if not isinstance(line, (list, tuple)) or len(line) < 2:
+                continue
+            candidate = line[1]
+            if isinstance(candidate, (list, tuple)) and candidate:
+                text = str(candidate[0]).strip()
+                if text:
+                    segments.append(text)
+    return segments
+
 
 @lru_cache(maxsize=1)
-def get_ocr_reader() -> easyocr.Reader:
-    return easyocr.Reader(["en"], gpu=False)
+def get_ocr_reader() -> Any:
+    try:
+        from paddleocr import PaddleOCR
+    except ImportError as exc:
+        raise RuntimeError(
+            "PaddleOCR is not installed. Install `paddlepaddle` and `paddleocr` before running OCR."
+        ) from exc
+
+    return PaddleOCR(use_angle_cls=True, lang=settings.ocr_language, use_gpu=settings.ocr_use_gpu, show_log=False)
 
 
 def extract_pdf_pages(file_path: Path) -> list[Path]:
@@ -43,8 +71,8 @@ def extract_ocr_text(file_path: Path) -> str:
 
         segments: list[str] = []
         for path in input_paths:
-            results = reader.readtext(str(path), detail=0)
-            segments.extend(segment.strip() for segment in results if segment.strip())
+            results = reader.ocr(str(path), cls=True)
+            segments.extend(_collect_paddle_text(results))
         return " ".join(segments)
     finally:
         for path in temp_images:

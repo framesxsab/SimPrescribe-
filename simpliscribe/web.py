@@ -2,14 +2,16 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any
 
 from fastapi import File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .config import settings
 from .inference import structure_medications
 from .ocr import extract_ocr_text
+from .reporting import build_pdf_report
 from .storage import append_history, get_analysis_record, load_history
 
 
@@ -70,6 +72,23 @@ async def render_details(request: Request, analysis_id: str, templates) -> HTMLR
 
 async def history_payload() -> dict[str, Any]:
     return {"analyses": load_history()}
+
+
+async def download_report(analysis_id: str) -> Response:
+    analysis = get_analysis_record(analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+
+    pdf_bytes = build_pdf_report(analysis, settings.app_name)
+    safe_name = sanitize_filename(str(analysis.get("filename") or "analysis"))
+    download_name = f"{Path(safe_name).stem}_report.pdf"
+    encoded_name = quote(download_name)
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{download_name}\"; filename*=UTF-8''{encoded_name}",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 async def analyze(file: UploadFile = File(...)) -> JSONResponse:
