@@ -17,6 +17,13 @@ DEFAULT_BENCHMARK_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" /
 SCORABLE_FIELDS = ("name", "type", "dosage", "frequency", "duration")
 SUPPORTED_PARQUET_SUFFIXES = {".parquet"}
 
+PARQUET_SECTION_PATTERN = re.compile(r"medications:\s*(.*?)(?:\s*signature:|$)", flags=re.IGNORECASE)
+PARQUET_PART_DELIMITER = re.compile(r"\s+-\s+")
+DOSAGE_PATTERN = re.compile(
+    r"(?P<dosage>\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?(?:\s*(?:mg|ml|mcg|g|iu|units))(?:\s*/\s*\d+(?:\.\d+)?\s*(?:mg|ml|mcg|g|iu|units))?)$",
+    flags=re.IGNORECASE,
+)
+
 PARQUET_FREQUENCY_MAP = {
     "take once daily": "once daily",
     "take twice daily": "twice daily",
@@ -41,17 +48,28 @@ def normalize_ground_truth_text(raw_text: str) -> str:
 
 
 def extract_medication_section(raw_text: str) -> str:
-    match = re.search(r"medications:\s*(.*?)\s*signature:", raw_text, flags=re.IGNORECASE)
+    match = PARQUET_SECTION_PATTERN.search(raw_text)
     if not match:
         return ""
     return match.group(1).strip()
 
 
+def split_medication_parts(medication_section: str) -> list[str]:
+    normalized_section = re.sub(r"^\s*-\s*", "", medication_section.strip())
+    if not normalized_section:
+        return []
+    return [part.strip() for part in PARQUET_PART_DELIMITER.split(normalized_section) if part.strip()]
+
+
 def parse_medication_line(line: str) -> tuple[str, str]:
-    match = re.match(r"^(?P<name>[A-Za-z][A-Za-z\s-]*?)\s+(?P<dosage>\d+(?:\.\d+)?\s*(?:mg|ml|mcg|g))$", line.strip(), flags=re.IGNORECASE)
+    normalized_line = re.sub(r"\s+", " ", line.strip())
+    match = DOSAGE_PATTERN.search(normalized_line)
     if not match:
-        return line.strip(), ""
-    return match.group("name").strip().title(), re.sub(r"\s+", " ", match.group("dosage")).strip()
+        return normalized_line, ""
+
+    name = normalized_line[:match.start()].strip()
+    dosage = re.sub(r"\s+", " ", match.group("dosage")).strip()
+    return name.title(), dosage
 
 
 def normalize_instruction(instruction: str) -> str:
@@ -62,7 +80,10 @@ def normalize_instruction(instruction: str) -> str:
 def parquet_ground_truth_to_case(raw_text: str, case_id: str, label: str) -> dict[str, Any]:
     normalized_text = normalize_ground_truth_text(raw_text)
     medication_section = extract_medication_section(normalized_text)
-    parts = [part.strip() for part in medication_section.split("-") if part.strip()]
+    parts = split_medication_parts(medication_section)
+
+    if not parts:
+        raise ValueError(f"Parquet benchmark row {case_id} does not contain a parseable medications section.")
 
     raw_lines: list[str] = []
     expected_medications: list[dict[str, Any]] = []
