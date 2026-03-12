@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,10 +15,100 @@ from .ocr import extract_ocr_text
 DEFAULT_BENCHMARK_CASES = Path(__file__).resolve().parent.parent / "data" / "benchmark_cases.sample.json"
 DEFAULT_BENCHMARK_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "benchmark_runs"
 SCORABLE_FIELDS = ("name", "type", "dosage", "frequency", "duration")
+SUPPORTED_PARQUET_SUFFIXES = {".parquet"}
+
+PARQUET_FREQUENCY_MAP = {
+    "take once daily": "once daily",
+    "take twice daily": "twice daily",
+    "every 12 hours": "twice daily",
+    "every 8 hours": "three times daily",
+    "at bedtime": "at bedtime",
+    "as needed for pain": "as needed",
+    "as directed": "Refer to prescription",
+    "after meals": "Refer to prescription",
+    "before meals": "Refer to prescription",
+    "with food": "Refer to prescription",
+}
 
 
 def normalize_for_score(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def normalize_ground_truth_text(raw_text: str) -> str:
+    cleaned = str(raw_text or "").replace("<s_ocr>", "").replace("</s>", "")
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def extract_medication_section(raw_text: str) -> str:
+    match = re.search(r"medications:\s*(.*?)\s*signature:", raw_text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def parse_medication_line(line: str) -> tuple[str, str]:
+    match = re.match(r"^(?P<name>[A-Za-z][A-Za-z\s-]*?)\s+(?P<dosage>\d+(?:\.\d+)?\s*(?:mg|ml|mcg|g))$", line.strip(), flags=re.IGNORECASE)
+    if not match:
+        return line.strip(), ""
+    return match.group("name").strip().title(), re.sub(r"\s+", " ", match.group("dosage")).strip()
+
+
+def normalize_instruction(instruction: str) -> str:
+    normalized = normalize_for_score(instruction)
+    return PARQUET_FREQUENCY_MAP.get(normalized, "Refer to prescription")
+
+
+def parquet_ground_truth_to_case(raw_text: str, case_id: str, label: str) -> dict[str, Any]:
+    normalized_text = normalize_ground_truth_text(raw_text)
+    medication_section = extract_medication_section(normalized_text)
+    parts = [part.strip() for part in medication_section.split("-") if part.strip()]
+
+    raw_lines: list[str] = []
+    expected_medications: list[dict[str, Any]] = []
+    index = 0
+    while index < len(parts):
+        medication_line = parts[index]
+        instruction = parts[index + 1] if index + 1 < len(parts) else ""
+        name, dosage = parse_medication_line(medication_line)
+        raw_lines.append(f"{medication_line} {instruction}".strip())
+        expected_medications.append(
+            {
+                "name": name,
+                "type": "",
+                "dosage": dosage,
+                "frequency": normalize_instruction(instruction),
+                "duration": "N/A",
+            }
+        )
+        index += 2
+
+    return {
+        "id": case_id,
+        "label": label,
+        "raw_text": "\n".join(raw_lines),
+        "expected_medications": expected_medications,
+    }
+
+
+def load_parquet_cases(cases_path: Path, limit: int | None = None) -> list[dict[str, Any]]:
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise RuntimeError("Parquet benchmark input requires pandas and pyarrow installed.") from exc
+
+    dataframe = pd.read_parquet(cases_path)
+    if "ground_truth" not in dataframe.columns:
+        raise ValueError("Parquet benchmark input must contain a ground_truth column.")
+
+    cases: list[dict[str, Any]] = []
+    for row_index, row in enumerate(dataframe.itertuples(index=False), start=1):
+        if limit is not None and len(cases) >= limit:
+            break
+        case_id = f"{cases_path.stem}-{row_index}"
+        label = f"{cases_path.stem} row {row_index}"
+        cases.append(parquet_ground_truth_to_case(getattr(row, "ground_truth", ""), case_id, label))
+    return cases
 
 
 @dataclass
@@ -37,10 +128,15 @@ class CaseScore:
     error: str = ""
 
 
-def load_cases(cases_path: Path) -> list[dict[str, Any]]:
+def load_cases(cases_path: Path, limit: int | None = None) -> list[dict[str, Any]]:
+    if cases_path.suffix.lower() in SUPPORTED_PARQUET_SUFFIXES:
+        return load_parquet_cases(cases_path, limit=limit)
+
     payload = json.loads(cases_path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise ValueError("Benchmark cases file must contain a JSON array.")
+    if limit is not None:
+        return payload[:limit]
     return payload
 
 
@@ -51,7 +147,7 @@ def score_case(case: dict[str, Any], actual: list[dict[str, Any]]) -> CaseScore:
 
     field_results: list[dict[str, Any]] = []
     matched_fields = 0
-    total_fields = max(len(expected), len(actual)) * len(SCORABLE_FIELDS)
+    total_fields = 0
 
     for index in range(max(len(expected), len(actual))):
         expected_med = expected[index] if index < len(expected) else {}
@@ -59,6 +155,8 @@ def score_case(case: dict[str, Any], actual: list[dict[str, Any]]) -> CaseScore:
         for field in SCORABLE_FIELDS:
             expected_value = normalize_for_score(expected_med.get(field, ""))
             actual_value = normalize_for_score(actual_med.get(field, ""))
+            if expected_value:
+                total_fields += 1
             matched = expected_value == actual_value and expected_value != ""
             if matched:
                 matched_fields += 1
@@ -205,6 +303,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a local extraction benchmark against sample prescription cases.")
     parser.add_argument("--cases", default=str(DEFAULT_BENCHMARK_CASES), help="Path to benchmark cases JSON file.")
     parser.add_argument("--output", default="", help="Optional path to write benchmark results JSON.")
+    parser.add_argument("--limit", type=int, default=0, help="Optional maximum number of cases to run. Use 0 for all cases.")
     return parser.parse_args()
 
 
@@ -213,7 +312,7 @@ def main() -> None:
     cases_path = Path(args.cases)
     output_path = Path(args.output) if args.output else DEFAULT_BENCHMARK_OUTPUT_DIR / "latest.json"
 
-    cases = load_cases(cases_path)
+    cases = load_cases(cases_path, limit=args.limit or None)
     result = run_benchmark(cases, base_dir=cases_path.parent)
     save_benchmark_result(result, output_path)
     print_summary(result)

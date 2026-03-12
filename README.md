@@ -101,6 +101,17 @@ Case files support either:
 
 - `raw_text`: benchmark only the structuring stage
 - `file_path`: benchmark the full OCR + structuring pipeline
+- `.parquet` with a `ground_truth` column: auto-converted into synthetic prescription benchmark cases
+
+Parquet input requires `pandas` and `pyarrow` in the active environment.
+
+Example parquet benchmark run:
+
+```bash
+python -m simpliscribe.benchmark --cases 0000.parquet --limit 25 --output data/benchmark_runs/parquet_0000.json
+```
+
+Use `--limit` while iterating on larger parquet datasets so the benchmark stays fast enough to compare fallback and endpoint modes.
 
 Example file-based case shape:
 

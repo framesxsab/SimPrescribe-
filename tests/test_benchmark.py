@@ -3,6 +3,8 @@ from simpliscribe.benchmark import run_case
 from simpliscribe.benchmark import run_benchmark
 from simpliscribe.benchmark import score_case
 
+import pandas as pd
+
 
 def test_score_case_counts_matching_fields():
     case = {
@@ -157,3 +159,24 @@ def test_run_case_supports_file_based_ocr(monkeypatch, tmp_path):
     assert result.source_path == "sample.png"
     assert result.raw_text == "Paracetamol 650 tab od 5 days"
     assert result.actual[0]["frequency"] == "once daily"
+
+
+def test_load_cases_supports_parquet_ground_truth(tmp_path):
+    parquet_path = tmp_path / "synthetic.parquet"
+    dataframe = pd.DataFrame(
+        [
+            {
+                "ground_truth": "<s_ocr> doctor_name: Dr. A medications: - Paracetamol 650 mg - Take once daily - Cetirizine 10 mg - At bedtime signature: Dr. A </s>"
+            }
+        ]
+    )
+    dataframe.to_parquet(parquet_path)
+
+    cases = load_cases(parquet_path)
+
+    assert len(cases) == 1
+    assert cases[0]["raw_text"] == "Paracetamol 650 mg Take once daily\nCetirizine 10 mg At bedtime"
+    assert cases[0]["expected_medications"][0]["name"] == "Paracetamol"
+    assert cases[0]["expected_medications"][0]["dosage"] == "650 mg"
+    assert cases[0]["expected_medications"][0]["frequency"] == "once daily"
+    assert cases[0]["expected_medications"][1]["frequency"] == "at bedtime"
