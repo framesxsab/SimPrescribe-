@@ -2,10 +2,12 @@ fastapi
 huggingface_hub
 httpx
 jinja2
+pandas
 paddleocr
 paddlepaddle
 Pillow
 PyMuPDF
+pyarrow
 pytest
 python-dotenv
 python-multipart
