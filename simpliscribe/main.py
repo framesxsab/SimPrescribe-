@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import settings
 from .storage import load_history
-from .web import analyze, history_payload, render_dashboard, render_details, render_history
+from .web import analyze, download_report, history_payload, render_dashboard, render_details, render_history
 
 load_dotenv()
 load_history()
@@ -39,3 +39,8 @@ async def get_history() -> dict:
 @app.post("/api/analyze")
 async def analyze_prescription(file: UploadFile):
     return await analyze(file)
+
+
+@app.get("/api/report/{analysis_id}")
+async def get_report(analysis_id: str):
+    return await download_report(analysis_id)

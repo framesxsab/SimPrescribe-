@@ -1,11 +1,13 @@
-easyocr
 fastapi
 huggingface_hub
 httpx
 jinja2
+paddleocr
+paddlepaddle
 Pillow
 PyMuPDF
 pytest
 python-dotenv
 python-multipart
+reportlab
 uvicorn[standard]
