@@ -694,6 +694,53 @@ def enrich_medications(medications: list[dict[str, Any]]) -> list[dict[str, Any]
     return normalized
 
 
+def refine_model_medications(raw_text: str, medications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    try:
+        heuristic_medications = fallback_extract(raw_text)
+    except Exception:
+        return medications
+
+    refined: list[dict[str, Any]] = []
+    for index, medication in enumerate(medications):
+        merged = dict(medication)
+        heuristic = heuristic_medications[index] if index < len(heuristic_medications) else None
+        if heuristic is None:
+            refined.append(merged)
+            continue
+
+        heuristic_name = str(heuristic.get("name") or "").strip()
+        current_name = str(merged.get("name") or "").strip()
+        if heuristic_name and not current_name:
+            merged["name"] = heuristic_name
+
+        heuristic_type = str(heuristic.get("type") or "").strip()
+        current_type = normalize_medication_type(str(merged.get("type") or ""), None)
+        if heuristic_type and heuristic_type != "Medication" and heuristic_type != current_type:
+            merged["type"] = heuristic_type
+
+        heuristic_frequency = str(heuristic.get("frequency") or "").strip()
+        current_frequency = normalize_frequency_value(str(merged.get("frequency") or ""))
+        if heuristic_frequency and heuristic_frequency != "Refer to prescription" and heuristic_frequency != current_frequency:
+            merged["frequency"] = heuristic_frequency
+
+        heuristic_duration = str(heuristic.get("duration") or "").strip()
+        current_duration = normalize_duration_value(str(merged.get("duration") or ""))
+        if heuristic_duration and heuristic_duration != "N/A" and current_duration == "N/A":
+            merged["duration"] = heuristic_duration
+
+        heuristic_dosage = str(heuristic.get("dosage") or "").strip()
+        current_dosage = normalize_dosage_value(
+            str(merged.get("dosage") or ""),
+            normalize_medication_type(str(merged.get("type") or ""), None),
+        )
+        if heuristic_dosage and heuristic_dosage != "N/A" and current_dosage == "N/A":
+            merged["dosage"] = heuristic_dosage
+
+        refined.append(merged)
+
+    return refined
+
+
 def call_huggingface(raw_text: str) -> list[dict[str, Any]]:
     client = InferenceClient(token=settings.hf_token or None)
     response = client.chat_completion(
@@ -710,6 +757,7 @@ def call_huggingface(raw_text: str) -> list[dict[str, Any]]:
     medications = parsed.get("medications", [])
     if not isinstance(medications, list):
         raise ValueError("The model returned an invalid medications payload.")
+    medications = refine_model_medications(raw_text, medications)
     return enrich_medications(medications)
 
 
@@ -737,6 +785,7 @@ def call_http_endpoint(raw_text: str) -> list[dict[str, Any]]:
 
     if not isinstance(medications, list):
         raise ValueError("Endpoint returned an invalid medications payload.")
+    medications = refine_model_medications(raw_text, medications)
     return enrich_medications(medications)
 
 

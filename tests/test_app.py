@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from simpliscribe.main import app
 from simpliscribe.inference import fallback_extract
 from simpliscribe.inference import build_medication_record
+from simpliscribe.inference import refine_model_medications
 from simpliscribe.storage import append_history, load_history, save_history
 
 
@@ -46,6 +47,35 @@ def test_build_medication_record_normalizes_model_output_fields():
     assert record["dosage"] == "650 mg"
     assert record["frequency"] == "once daily"
     assert record["duration"] == "5 days"
+
+
+def test_refine_model_medications_uses_ocr_heuristics_for_shorthand_fields():
+    raw_text = "Amoxycillin 500 cap bd 5 days\nCetirizine 10 tab hs 3 days"
+    model_medications = [
+        {
+            "name": "Amoxycillin",
+            "category": "General",
+            "type": "Tablet",
+            "dosage": "500 mg",
+            "frequency": "twice daily",
+            "duration": "5 days",
+            "insight": "Follow the prescription exactly as written.",
+        },
+        {
+            "name": "Cetirizine",
+            "category": "General",
+            "type": "Tablet",
+            "dosage": "10 mg",
+            "frequency": "three times daily",
+            "duration": "3 days",
+            "insight": "Follow the prescription exactly as written.",
+        },
+    ]
+
+    refined = refine_model_medications(raw_text, model_medications)
+
+    assert refined[0]["type"] == "Capsule"
+    assert refined[1]["frequency"] == "at bedtime"
 
 
 def test_report_download_route_returns_pdf():
