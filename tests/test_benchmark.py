@@ -180,3 +180,66 @@ def test_load_cases_supports_parquet_ground_truth(tmp_path):
     assert cases[0]["expected_medications"][0]["dosage"] == "650 mg"
     assert cases[0]["expected_medications"][0]["frequency"] == "once daily"
     assert cases[0]["expected_medications"][1]["frequency"] == "at bedtime"
+
+
+def test_load_cases_supports_parquet_ground_truth_without_signature(tmp_path):
+    parquet_path = tmp_path / "synthetic_no_signature.parquet"
+    dataframe = pd.DataFrame(
+        [
+            {
+                "ground_truth": "<s_ocr> doctor_name: Dr. A medications: - Paracetamol 650 mg - Take once daily </s>"
+            }
+        ]
+    )
+    dataframe.to_parquet(parquet_path)
+
+    cases = load_cases(parquet_path)
+
+    assert len(cases) == 1
+    assert cases[0]["expected_medications"] == [
+        {
+            "name": "Paracetamol",
+            "type": "",
+            "dosage": "650 mg",
+            "frequency": "once daily",
+            "duration": "N/A",
+        }
+    ]
+
+
+def test_load_cases_preserves_hyphenated_medication_names(tmp_path):
+    parquet_path = tmp_path / "synthetic_hyphenated.parquet"
+    dataframe = pd.DataFrame(
+        [
+            {
+                "ground_truth": "<s_ocr> medications: - Co-trimoxazole 500/125 mg - Take twice daily signature: Dr. A </s>"
+            }
+        ]
+    )
+    dataframe.to_parquet(parquet_path)
+
+    cases = load_cases(parquet_path)
+
+    assert len(cases) == 1
+    assert cases[0]["expected_medications"][0]["name"] == "Co-Trimoxazole"
+    assert cases[0]["expected_medications"][0]["dosage"] == "500/125 mg"
+    assert cases[0]["expected_medications"][0]["frequency"] == "twice daily"
+
+
+def test_load_cases_supports_complex_dosage_formats(tmp_path):
+    parquet_path = tmp_path / "synthetic_complex_dosage.parquet"
+    dataframe = pd.DataFrame(
+        [
+            {
+                "ground_truth": "<s_ocr> medications: - Ambroxol 5 mg/5 ml - As directed signature: Dr. A </s>"
+            }
+        ]
+    )
+    dataframe.to_parquet(parquet_path)
+
+    cases = load_cases(parquet_path)
+
+    assert len(cases) == 1
+    assert cases[0]["expected_medications"][0]["name"] == "Ambroxol"
+    assert cases[0]["expected_medications"][0]["dosage"] == "5 mg/5 ml"
+    assert cases[0]["expected_medications"][0]["frequency"] == "Refer to prescription"
