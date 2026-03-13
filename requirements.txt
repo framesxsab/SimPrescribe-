@@ -11,5 +11,6 @@ pyarrow
 pytest
 python-dotenv
 python-multipart
+requests>=2.32.3
 reportlab
 uvicorn[standard]
