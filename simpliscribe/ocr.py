@@ -48,7 +48,45 @@ def get_ocr_reader() -> Any:
                 "PaddleOCR is not installed. Install `paddlepaddle` and `paddleocr` before running OCR."
             ) from exc
 
-        _ocr_reader = PaddleOCR(use_angle_cls=True, lang=settings.ocr_language, use_gpu=settings.ocr_use_gpu, show_log=False)
+        reader = None
+        init_errors: list[Exception] = []
+
+        # PaddleOCR v3 dropped use_gpu/use_angle_cls in favor of device/use_textline_orientation.
+        for kwargs in (
+            {
+                "lang": settings.ocr_language,
+                "device": "gpu" if settings.ocr_use_gpu else "cpu",
+                "use_textline_orientation": True,
+                "show_log": False,
+            },
+            {
+                "lang": settings.ocr_language,
+                "device": "gpu" if settings.ocr_use_gpu else "cpu",
+                "use_textline_orientation": True,
+            },
+            {
+                "lang": settings.ocr_language,
+                "use_angle_cls": True,
+                "use_gpu": settings.ocr_use_gpu,
+                "show_log": False,
+            },
+            {
+                "lang": settings.ocr_language,
+                "use_angle_cls": True,
+                "use_gpu": settings.ocr_use_gpu,
+            },
+        ):
+            try:
+                reader = PaddleOCR(**kwargs)
+                break
+            except (TypeError, ValueError) as exc:
+                init_errors.append(exc)
+
+        if reader is None:
+            last_error = init_errors[-1] if init_errors else RuntimeError("Unknown PaddleOCR initialization failure.")
+            raise RuntimeError(f"Failed to initialize PaddleOCR: {last_error}") from last_error
+
+        _ocr_reader = reader
         return _ocr_reader
 
 
@@ -84,7 +122,10 @@ def extract_ocr_text(file_path: Path) -> str:
 
         segments: list[str] = []
         for path in input_paths:
-            results = reader.ocr(str(path), cls=True)
+            try:
+                results = reader.ocr(str(path), cls=True)
+            except TypeError:
+                results = reader.ocr(str(path))
             segments.extend(_collect_paddle_text(results))
         return " ".join(segments)
     finally:

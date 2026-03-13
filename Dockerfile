@@ -18,7 +18,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /app/.paddleocr && python -c "from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, show_log=False); print('PaddleOCR models ready')"
+RUN mkdir -p /app/.paddleocr && python - <<'PY'
+from paddleocr import PaddleOCR
+
+try:
+	PaddleOCR(lang="en", device="cpu", use_textline_orientation=True, show_log=False)
+except (TypeError, ValueError):
+	PaddleOCR(lang="en", use_angle_cls=True, use_gpu=False, show_log=False)
+
+print("PaddleOCR models ready")
+PY
 
 COPY . .
 
