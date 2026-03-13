@@ -1,11 +1,15 @@
-from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import fitz
 from PIL import Image
 
 from .config import settings
+
+
+_ocr_reader: Any | None = None
+_ocr_reader_lock = Lock()
 
 
 def _collect_paddle_text(results: Any) -> list[str]:
@@ -27,16 +31,25 @@ def _collect_paddle_text(results: Any) -> list[str]:
     return segments
 
 
-@lru_cache(maxsize=1)
 def get_ocr_reader() -> Any:
-    try:
-        from paddleocr import PaddleOCR
-    except ImportError as exc:
-        raise RuntimeError(
-            "PaddleOCR is not installed. Install `paddlepaddle` and `paddleocr` before running OCR."
-        ) from exc
+    global _ocr_reader
+    if _ocr_reader is not None:
+        return _ocr_reader
 
-    return PaddleOCR(use_angle_cls=True, lang=settings.ocr_language, use_gpu=settings.ocr_use_gpu, show_log=False)
+    # Paddle backends can fail when initialized concurrently.
+    with _ocr_reader_lock:
+        if _ocr_reader is not None:
+            return _ocr_reader
+
+        try:
+            from paddleocr import PaddleOCR
+        except ImportError as exc:
+            raise RuntimeError(
+                "PaddleOCR is not installed. Install `paddlepaddle` and `paddleocr` before running OCR."
+            ) from exc
+
+        _ocr_reader = PaddleOCR(use_angle_cls=True, lang=settings.ocr_language, use_gpu=settings.ocr_use_gpu, show_log=False)
+        return _ocr_reader
 
 
 def extract_pdf_pages(file_path: Path) -> list[Path]:
