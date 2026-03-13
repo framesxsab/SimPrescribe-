@@ -21,13 +21,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN mkdir -p /app/.paddleocr && python - <<'PY'
 from paddleocr import PaddleOCR
 
-try:
-	PaddleOCR(lang="en", device="cpu", use_textline_orientation=True, show_log=False)
-except (TypeError, ValueError):
-	PaddleOCR(lang="en", use_angle_cls=True, use_gpu=False, show_log=False)
-
-print("PaddleOCR models ready")
-PY
+for kwargs in (
+    {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True, 'show_log': False},
+    {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True},
+    {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False, 'show_log': False},
+    {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False}
+):
+    try:
+        PaddleOCR(**kwargs)
+        break
+    except (TypeError, ValueError):
+        pass
 
 COPY . .
 
