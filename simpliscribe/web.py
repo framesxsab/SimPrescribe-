@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +14,9 @@ from .inference import structure_medications
 from .ocr import extract_ocr_text
 from .reporting import build_pdf_report
 from .storage import append_history, get_analysis_record, load_history
+
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now_iso() -> str:
@@ -109,6 +113,7 @@ async def analyze(file: UploadFile = File(...)) -> JSONResponse:
     except HTTPException:
         raise
     except Exception as exc:
+        logger.exception("Prescription analysis failed.")
         message = str(exc)
         if "PDX has already been initialized" in message:
             message = "OCR engine is warming up. Please retry in a few seconds."
