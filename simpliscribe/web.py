@@ -109,7 +109,10 @@ async def analyze(file: UploadFile = File(...)) -> JSONResponse:
     except HTTPException:
         raise
     except Exception as exc:
-        return JSONResponse(status_code=500, content={"error": str(exc), "medications": []})
+        message = str(exc)
+        if "PDX has already been initialized" in message:
+            message = "OCR engine is warming up. Please retry in a few seconds."
+        return JSONResponse(status_code=500, content={"error": message, "medications": []})
     finally:
         if stored_file.exists():
             stored_file.unlink()
