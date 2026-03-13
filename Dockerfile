@@ -33,6 +33,9 @@ for kwargs in (
     except (TypeError, ValueError):
         pass
 
+print("PaddleOCR models ready")
+PY
+
 COPY . .
 
 EXPOSE 7860
