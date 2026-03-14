@@ -14,12 +14,36 @@ _ocr_reader_lock = Lock()
 
 def _collect_paddle_text(results: Any) -> list[str]:
     segments: list[str] = []
-    if not isinstance(results, list):
-        return segments
+    
+    # Handle the case where results is a single paddle object or dict instead of a list
+    if not isinstance(results, (list, tuple)):
+        results = [results]
 
     for page_result in results:
+        # PaddleOCR 3.0+ / Paddlex returns objects or dictionaries with a "rec_text" property
+        if hasattr(page_result, "keys") and hasattr(page_result, "__getitem__"):
+            # Using dict access
+            if "rec_text" in page_result:
+                texts = page_result["rec_text"]
+                if isinstance(texts, list):
+                    segments.extend([str(t).strip() for t in texts if str(t).strip()])
+                elif isinstance(texts, str) and texts.strip():
+                    segments.append(texts.strip())
+                continue
+
+        # If it's a PaddleX result object with attributes
+        if hasattr(page_result, "rec_text"):
+            texts = page_result.rec_text
+            if isinstance(texts, list):
+                segments.extend([str(t).strip() for t in texts if str(t).strip()])
+            elif isinstance(texts, str) and texts.strip():
+                segments.append(texts.strip())
+            continue
+
+        # Fallback to PaddleOCR 2.x standard List[List[Box, (Text, Score)]]
         if not isinstance(page_result, list):
             continue
+            
         for line in page_result:
             if not isinstance(line, (list, tuple)) or len(line) < 2:
                 continue
@@ -28,6 +52,9 @@ def _collect_paddle_text(results: Any) -> list[str]:
                 text = str(candidate[0]).strip()
                 if text:
                     segments.append(text)
+            elif isinstance(candidate, str) and candidate.strip():
+                segments.append(candidate.strip())
+
     return segments
 
 
