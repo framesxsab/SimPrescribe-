@@ -800,22 +800,23 @@ def call_huggingface(raw_text: str) -> dict[str, Any]:
     client = InferenceClient(token=settings.hf_token or None)
     response = client.chat_completion(
         messages=[
-            {"role": "system", "content": "Return only JSON."},
+            {"role": "system", "content": "You are a medical prescription parser. Return only valid JSON with no markdown or explanation."},
             {"role": "user", "content": build_structuring_prompt(raw_text)},
         ],
         model=settings.hf_model,
-        max_tokens=600,
-        temperature=0.1,
+        max_tokens=1000,
+        temperature=0.05,
     )
     payload = response.choices[0].message.content or "{}"
     parsed = normalize_llm_json(payload)
     medications = parsed.get("medications", [])
     if not isinstance(medications, list):
         raise ValueError("The model returned an invalid medications payload.")
+    medications = refine_model_medications(raw_text, medications)
     parsed["medications"] = enrich_medications(medications)
     for key in ["patient_name", "doctor_name", "date"]:
-        if key not in parsed:
-            parsed[key] = "N/A"
+        val = str(parsed.get(key) or "").strip()
+        parsed[key] = val if val and val.lower() not in {"na", "n/a", "none", "unknown", ""} else "N/A"
     return parsed
 
 
