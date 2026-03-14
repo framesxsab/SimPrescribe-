@@ -624,6 +624,9 @@ OCR Text:
 
 Schema:
 {{
+  "patient_name": "name of patient if found, otherwise N/A",
+  "doctor_name": "name of doctor if found, otherwise N/A",
+  "date": "prescription date if found, otherwise N/A",
   "medications": [
     {{
       "name": "medicine name",
@@ -642,6 +645,9 @@ OCR Text: `Paracetamol 650 tab od 5 days`
 
 Output:
 {{
+    "patient_name": "John Doe",
+    "doctor_name": "Dr. Smith",
+    "date": "10/12/2023",
     "medications": [
         {{
             "name": "Paracetamol",
@@ -741,7 +747,7 @@ def refine_model_medications(raw_text: str, medications: list[dict[str, Any]]) -
     return refined
 
 
-def call_huggingface(raw_text: str) -> list[dict[str, Any]]:
+def call_huggingface(raw_text: str) -> dict[str, Any]:
     client = InferenceClient(token=settings.hf_token or None)
     response = client.chat_completion(
         messages=[
@@ -757,11 +763,14 @@ def call_huggingface(raw_text: str) -> list[dict[str, Any]]:
     medications = parsed.get("medications", [])
     if not isinstance(medications, list):
         raise ValueError("The model returned an invalid medications payload.")
-    medications = refine_model_medications(raw_text, medications)
-    return enrich_medications(medications)
+    parsed["medications"] = enrich_medications(medications)
+    for key in ["patient_name", "doctor_name", "date"]:
+        if key not in parsed:
+            parsed[key] = "N/A"
+    return parsed
 
 
-def call_http_endpoint(raw_text: str) -> list[dict[str, Any]]:
+def call_http_endpoint(raw_text: str) -> dict[str, Any]:
     if not settings.model_api_url:
         raise ValueError("MODEL_API_URL is required when INFERENCE_PROVIDER=endpoint.")
 
@@ -776,6 +785,7 @@ def call_http_endpoint(raw_text: str) -> list[dict[str, Any]]:
         data = response.json()
 
     if isinstance(data, dict) and "medications" in data:
+        parsed = data
         medications = data["medications"]
     elif isinstance(data, dict) and "output" in data:
         parsed = normalize_llm_json(str(data["output"]))
@@ -785,11 +795,14 @@ def call_http_endpoint(raw_text: str) -> list[dict[str, Any]]:
 
     if not isinstance(medications, list):
         raise ValueError("Endpoint returned an invalid medications payload.")
-    medications = refine_model_medications(raw_text, medications)
-    return enrich_medications(medications)
+    parsed["medications"] = enrich_medications(medications)
+    for key in ["patient_name", "doctor_name", "date"]:
+        if key not in parsed:
+            parsed[key] = "N/A"
+    return parsed
 
 
-def fallback_extract(raw_text: str) -> list[dict[str, Any]]:
+def fallback_extract(raw_text: str) -> dict[str, Any]:
     candidates = split_segments(raw_text)
     medications: list[dict[str, Any]] = []
     for segment in candidates[:6]:
@@ -818,10 +831,15 @@ def fallback_extract(raw_text: str) -> list[dict[str, Any]]:
 
     if not medications:
         raise ValueError("No readable medication details were found in the OCR text.")
-    return medications
+    return {
+        "patient_name": "N/A",
+        "doctor_name": "N/A",
+        "date": "N/A",
+        "medications": medications
+    }
 
 
-def structure_medications(raw_text: str) -> list[dict[str, Any]]:
+def structure_medications(raw_text: str) -> dict[str, Any]:
     if not raw_text.strip():
         raise ValueError("No readable text was extracted from the uploaded document.")
 
