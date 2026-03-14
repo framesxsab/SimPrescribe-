@@ -826,7 +826,8 @@ def enrich_medications(medications: list[dict[str, Any]]) -> list[dict[str, Any]
 
 def refine_model_medications(raw_text: str, medications: list[dict[str, Any]]) -> list[dict[str, Any]]:
     try:
-        heuristic_medications = fallback_extract(raw_text)
+        fallback_result = fallback_extract(raw_text)
+        heuristic_medications = fallback_result.get("medications", []) if isinstance(fallback_result, dict) else fallback_result
     except Exception:
         return medications
 
@@ -978,7 +979,8 @@ def structure_medications(raw_text: str) -> dict[str, Any]:
             try:
                 return call_huggingface(raw_text)
             except Exception as exc:
-                logger.warning("HuggingFace inference failed, falling back to heuristic parser: %s", exc)
+                import traceback
+                logger.error("HuggingFace inference failed, falling back to heuristic parser:\n%s", traceback.format_exc())
         else:
             logger.warning("No HF token set, using heuristic fallback parser.")
         return fallback_extract(raw_text)
