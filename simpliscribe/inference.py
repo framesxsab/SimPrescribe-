@@ -729,6 +729,75 @@ def normalize_llm_json(raw_response: str) -> dict[str, Any]:
     return json.loads(cleaned[start : end + 1])
 
 
+JUNK_NAME_PATTERNS = [
+    # Clinic / hospital / institution names
+    r"(?i)\b(clinic|hospital|health\s*care|health\s*choice|medical\s*center|nursing|laboratory|labs?|pharmacy|dispensary|polyclinic)\b",
+    # Doctor / patient form fields
+    r"(?i)\b(mr\.|mrs\.|ms\.|miss\.|dr\.|prof\.|patient|doctor|prescri|signature|address|phone|tel|fax|email|reg\s*no|registration|mbbs|md|licence|license)\b",
+    # Frequency/timing phrases misidentified as names
+    r"(?i)^(once\s+a|twice\s+a|thrice\s+a|after\s+(food|meal)|before\s+(food|meal)|morning|evening|night|daily|bedtime)",
+    # Generic form text
+    r"(?i)^(rx|date|age|sex|gender|weight|diagnosis|complaint|history|follow\s*up|next\s*visit|advice)",
+    # Pure numbers, single characters, or very short junk
+    r"^[\d\s.,:;/\-\(\)\[\]]+$",
+    # Unknown medication placeholder
+    r"(?i)^unknown\s+medication$",
+]
+
+JUNK_NAME_EXACT = {
+    "unknown", "unknown medication", "medication", "n/a", "na", "none",
+    "rx", "date", "age", "sex", "name", "patient", "doctor",
+    "health", "clinic", "hospital", "pharmacy", "lab", "labs",
+    "address", "phone", "signature", "diagnosis",
+}
+
+
+def is_junk_medication(name: str) -> bool:
+    """Return True if name is NOT a real medication."""
+    if not name or not name.strip():
+        return True
+
+    cleaned = name.strip()
+
+    # Exact match blocklist
+    if cleaned.lower() in JUNK_NAME_EXACT:
+        return True
+
+    # Too short to be a real medicine
+    if len(cleaned) <= 2:
+        return True
+
+    # Regex pattern match
+    for pattern in JUNK_NAME_PATTERNS:
+        if re.search(pattern, cleaned):
+            return True
+
+    # Contains brackets, slashes with letters (form field patterns)
+    if re.search(r"[/\\]", cleaned) and re.search(r"[A-Za-z].*[/\\].*[A-Za-z]", cleaned):
+        return True
+
+    return False
+
+
+def filter_junk_medications(medications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove entries that are clearly not real medications."""
+    filtered = []
+    for med in medications:
+        name = str(med.get("name") or "").strip()
+        if is_junk_medication(name):
+            continue
+        # Clean up the name: remove leading frequency text
+        cleaned_name = re.sub(r"(?i)^(once|twice|thrice|daily)\s+(a\s+)?(day\s+)?", "", name).strip()
+        cleaned_name = re.sub(r"(?i)^(after|before)\s+(food|meals?)\s*", "", cleaned_name).strip()
+        cleaned_name = re.sub(r"[\[\]\(\),]+$", "", cleaned_name).strip()
+        cleaned_name = re.sub(r"^[\[\]\(\),]+", "", cleaned_name).strip()
+        if not cleaned_name or is_junk_medication(cleaned_name):
+            continue
+        med["name"] = title_case(cleaned_name)
+        filtered.append(med)
+    return filtered
+
+
 def enrich_medications(medications: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for medication in medications:
@@ -813,7 +882,7 @@ def call_huggingface(raw_text: str) -> dict[str, Any]:
     if not isinstance(medications, list):
         raise ValueError("The model returned an invalid medications payload.")
     medications = refine_model_medications(raw_text, medications)
-    parsed["medications"] = enrich_medications(medications)
+    parsed["medications"] = filter_junk_medications(enrich_medications(medications))
     for key in ["patient_name", "doctor_name", "date"]:
         val = str(parsed.get(key) or "").strip()
         parsed[key] = val if val and val.lower() not in {"na", "n/a", "none", "unknown", ""} else "N/A"
@@ -845,7 +914,7 @@ def call_http_endpoint(raw_text: str) -> dict[str, Any]:
 
     if not isinstance(medications, list):
         raise ValueError("Endpoint returned an invalid medications payload.")
-    parsed["medications"] = enrich_medications(medications)
+    parsed["medications"] = filter_junk_medications(enrich_medications(medications))
     for key in ["patient_name", "doctor_name", "date"]:
         if key not in parsed:
             parsed[key] = "N/A"
@@ -879,6 +948,7 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
             )
         )
 
+    medications = filter_junk_medications(medications)
     if not medications:
         raise ValueError("No readable medication details were found in the OCR text.")
     return {
