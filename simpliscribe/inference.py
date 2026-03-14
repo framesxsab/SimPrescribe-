@@ -368,6 +368,31 @@ def extract_duration(segment: str) -> str:
 
 def extract_frequency(segment: str) -> str:
     lower_segment = segment.lower()
+
+    # Natural language patterns (check before shorthand map to catch "thrice a day" etc.)
+    natural_patterns = [
+        (r"\bonce\s+a?\s*day\b|\bdaily\b|\bod\b", "once daily"),
+        (r"\btwice\s+a?\s*day\b|\bbd\b|\bbid\b|\btwo\s+times\b", "twice daily"),
+        (r"\bthrice\s+a?\s*day\b|\btds\b|\btid\b|\bthree\s+times\b", "three times daily"),
+        (r"\bfour\s+times\b|\bqid\b", "four times daily"),
+        (r"\bat\s+bedtime\b|\bbedtime\b|\bnight\b|\bhs\b", "at bedtime"),
+        (r"\bsos\b|\bas\s+needed\b|\bwhen\s+needed\b|\bprn\b", "as needed"),
+        (r"\bimmediately\b|\bstat\b", "immediately"),
+        (r"\bmorning\s+(and\s+)?night\b|\bmorning\s+(and\s+)?evening\b", "twice daily"),
+        (r"\bmorning\b", "once daily in the morning"),
+    ]
+
+    for pattern, result in natural_patterns:
+        if re.search(pattern, lower_segment):
+            # Combine with meal timing if present
+            meal_suffix = ""
+            if re.search(r"\bafter\s+(food|meal|meals|eating)\b|\bpc\b", lower_segment):
+                meal_suffix = " after food"
+            elif re.search(r"\bbefore\s+(food|meal|meals|eating)\b|\bac\b", lower_segment):
+                meal_suffix = " before food"
+            freq = result + meal_suffix
+            return freq
+
     for shorthand, expanded in FREQUENCY_MAP.items():
         if re.search(rf"\b{re.escape(shorthand)}\b", lower_segment):
             meal_suffix = ""
@@ -599,23 +624,34 @@ def build_medication_record(
 
 def build_structuring_prompt(raw_text: str) -> str:
     return f"""
-You are extracting structured medication information from OCR text.
-Return only valid JSON using the schema below.
+You are a medical prescription parser. Extract structured medication data from OCR text of a doctor's prescription.
+Return ONLY valid JSON — no markdown, no comments, no explanation.
 
-Rules:
-- Return a JSON object, not an array.
-- Use the key `medications` exactly.
-- Do not include markdown, comments, or explanation text.
-- Do not invent medicines that are not present in the OCR text.
-- Split multiple medicines into separate objects.
-- Keep `dosage` to strength or amount only, for example `650 mg`, `5 ml`, `1 tablet`.
-- Do not put schedule or duration inside `dosage`.
-- `type` must be one of: `Tablet`, `Capsule`, `Syrup`, `Suspension`, `Injection`, `Cream`, `Ointment`, `Drops`, `Medication`.
-- `frequency` should be short, for example `once daily`, `twice daily`, `three times daily`, `at bedtime`, `as needed`, or `Refer to prescription`.
-- `duration` should be short, for example `5 days`, `1 week`, or `N/A`.
-- `category` should be brief. If unknown, use `General`.
-- `insight` must be one short safety note. If unclear, use `Follow the prescription exactly as written.`
-- If a field is unclear, prefer `N/A`, `General`, `Medication`, or `Refer to prescription` instead of guessing.
+IMPORTANT RULES:
+- `medications` must ONLY contain actual medicine/drug names. Do NOT include:
+  * Clinic names, hospital names, addresses, phone numbers
+  * Doctor's name, patient's name, registration numbers, dates
+  * Words like "Clinic", "Hospital", "Health", "Care", "Center", "Labs", "Pharmacy"
+- For `patient_name`: look for "Patient:", "Name:", or a name near "Age:" or "D.O.B"
+- For `doctor_name`: look for "Dr.", "Doctor:", or a name near "Reg No", "MBBS", "MD"
+- For `date`: look for "Date:", "Dt:" or a date pattern (DD/MM/YYYY or MM/DD/YYYY)
+- Medicine `name` must be a real drug name only (e.g. "Ibuprofen", "Paracetamol", "Amoxicillin")
+- `dosage`: strength or amount only — e.g. `500 mg`, `5 ml`, `1 tablet`. Never include instructions in dosage.
+- `frequency`: convert natural language to standard short form:
+  * "Once a day / OD / Daily" → "once daily"
+  * "Twice a day / BD / BID" → "twice daily"
+  * "Thrice a day / TDS / TID / Three times" → "three times daily"
+  * "Four times / QID" → "four times daily"
+  * "At bedtime / HS / Night" → "at bedtime"
+  * "SOS / As needed / When needed" → "as needed"
+  * "Before meals / AC" → "once daily before food" (combine with timing)
+  * "After meals / PC" → "once daily after food" (combine with timing)
+  * If timing pattern like "1-0-1" is found, convert appropriately
+- `duration`: e.g. `5 days`, `2 weeks`, `1 month`, or `N/A`
+- `type`: must be one of: `Tablet`, `Capsule`, `Syrup`, `Suspension`, `Injection`, `Cream`, `Ointment`, `Drops`, `Medication`
+- `category`: short drug category (e.g. "Antibiotic", "Analgesic", "Antacid"). Use "General" if unknown.
+- `insight`: one short patient safety note tailored to the specific medicine. Keep it under 15 words.
+- If you are unsure about a field, use `N/A` rather than guessing.
 
 OCR Text:
 ---
@@ -624,16 +660,16 @@ OCR Text:
 
 Schema:
 {{
-  "patient_name": "name of patient if found, otherwise N/A",
-  "doctor_name": "name of doctor if found, otherwise N/A",
-  "date": "prescription date if found, otherwise N/A",
+  "patient_name": "name of patient or N/A",
+  "doctor_name": "name of doctor with title (e.g. Dr. Smith) or N/A",
+  "date": "prescription date or N/A",
   "medications": [
     {{
-      "name": "medicine name",
-      "category": "category",
+      "name": "drug name only",
+      "category": "drug category",
       "type": "type",
-      "dosage": "dosage",
-      "frequency": "frequency",
+      "dosage": "strength or amount",
+      "frequency": "standard frequency",
       "duration": "duration",
       "insight": "one short safety note"
     }}
@@ -641,22 +677,35 @@ Schema:
 }}
 
 Example:
-OCR Text: `Paracetamol 650 tab od 5 days`
+OCR Text: `Patient: John Doe  Dr. Ashley Stone MBBS  Date: 04/15/2023
+Health Choice Clinic
+Rx:
+1. Ibuprofen 400mg Tab - Twice a day after meals x 5 days
+2. Amoxicillin 500mg Cap - Thrice a day x 7 days`
 
 Output:
 {{
     "patient_name": "John Doe",
-    "doctor_name": "Dr. Smith",
-    "date": "10/12/2023",
+    "doctor_name": "Dr. Ashley Stone",
+    "date": "04/15/2023",
     "medications": [
         {{
-            "name": "Paracetamol",
-            "category": "General",
+            "name": "Ibuprofen",
+            "category": "Analgesic",
             "type": "Tablet",
-            "dosage": "650 mg",
-            "frequency": "once daily",
+            "dosage": "400 mg",
+            "frequency": "twice daily after food",
             "duration": "5 days",
-            "insight": "Follow the prescription exactly as written."
+            "insight": "Take with food to reduce stomach upset."
+        }},
+        {{
+            "name": "Amoxicillin",
+            "category": "Antibiotic",
+            "type": "Capsule",
+            "dosage": "500 mg",
+            "frequency": "three times daily",
+            "duration": "7 days",
+            "insight": "Complete the full course even if you feel better."
         }}
     ]
 }}
