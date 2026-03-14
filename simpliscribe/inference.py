@@ -303,14 +303,20 @@ def find_best_medicine_match(segment: str) -> MedicineEntry | None:
     if not candidates:
         return None
 
+    # Fast exact match first
     for candidate in candidates:
         if candidate in lexicon:
             return lexicon[candidate]
 
+    # Prefix-based fuzzy match: only compare against aliases that share
+    # the same first 3 characters to avoid brute-force O(n) scan
     best_entry: MedicineEntry | None = None
     best_score = 0.0
     for candidate in candidates:
+        prefix = candidate[:3] if len(candidate) >= 3 else candidate
         for alias, entry in lexicon.items():
+            if not alias.startswith(prefix):
+                continue
             score = SequenceMatcher(None, candidate, alias).ratio()
             if score > best_score:
                 best_score = score
