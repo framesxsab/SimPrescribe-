@@ -955,8 +955,6 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
         )
 
     medications = filter_junk_medications(medications)
-    if not medications:
-        raise ValueError("No readable medication details were found in the OCR text.")
     return {
         "patient_name": "N/A",
         "doctor_name": "N/A",
@@ -966,16 +964,32 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
 
 
 def structure_medications(raw_text: str) -> dict[str, Any]:
+    import logging
+    logger = logging.getLogger(__name__)
+
     if not raw_text.strip():
         raise ValueError("No readable text was extracted from the uploaded document.")
 
     provider = settings.inference_provider.strip().lower()
+
+    # Always try HuggingFace first if token is available, fall back on any error
     if provider == "huggingface":
-        if not settings.hf_token:
-            return fallback_extract(raw_text)
-        return call_huggingface(raw_text)
+        if settings.hf_token:
+            try:
+                return call_huggingface(raw_text)
+            except Exception as exc:
+                logger.warning("HuggingFace inference failed, falling back to heuristic parser: %s", exc)
+        else:
+            logger.warning("No HF token set, using heuristic fallback parser.")
+        return fallback_extract(raw_text)
+
     if provider == "endpoint":
-        return call_http_endpoint(raw_text)
+        try:
+            return call_http_endpoint(raw_text)
+        except Exception as exc:
+            logger.warning("Endpoint inference failed, falling back: %s", exc)
+            return fallback_extract(raw_text)
+
     if provider == "fallback":
         return fallback_extract(raw_text)
     raise ValueError(f"Unsupported inference provider: {settings.inference_provider}")
