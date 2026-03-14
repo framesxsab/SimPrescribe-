@@ -19,7 +19,7 @@ class Settings:
     medicine_database_dataset: Path = BASE_DIR / "all_medicine databased.csv"
     max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "10"))
     hf_token: str = os.environ.get("HUGGINGFACEHUB_API_TOKEN", "")
-    hf_model: str = os.environ.get("HF_CHAT_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
+    hf_model: str = os.environ.get("HF_CHAT_MODEL", "Qwen/Qwen2.5-7B-Instruct")
     inference_provider: str = os.environ.get("INFERENCE_PROVIDER", "huggingface")
     model_api_url: str = os.environ.get("MODEL_API_URL", "")
     model_api_key: str = os.environ.get("MODEL_API_KEY", "")
