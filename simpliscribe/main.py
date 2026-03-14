@@ -11,6 +11,22 @@ from .web import analyze, download_report, history_payload, render_dashboard, re
 load_dotenv()
 load_history()
 
+# Pre-warm heavy resources at startup to avoid slow first request
+import threading
+def _preload():
+    try:
+        from .inference import load_medicine_lexicon
+        load_medicine_lexicon()
+    except Exception:
+        pass
+    try:
+        from .ocr import get_ocr_reader
+        get_ocr_reader()
+    except Exception:
+        pass
+
+threading.Thread(target=_preload, daemon=True).start()
+
 app = FastAPI(title=f"{settings.app_name} API")
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 templates = Jinja2Templates(directory=str(settings.templates_dir))
