@@ -13,14 +13,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	libsm6 \
 	libxext6 \
 	libxrender1 \
+	libgomp1 \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 RUN mkdir -p /app/.paddleocr && python - <<'PY'
-from paddleocr import PaddleOCR
+import sys
+import traceback
 
+try:
+    from paddleocr import PaddleOCR
+except Exception as e:
+    print(f"Failed to import PaddleOCR: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+
+success = False
 for kwargs in (
     {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True, 'show_log': False},
     {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True},
@@ -28,10 +38,20 @@ for kwargs in (
     {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False}
 ):
     try:
+        print(f"Trying to initialize PaddleOCR with kwargs: {kwargs}")
         PaddleOCR(**kwargs)
+        success = True
         break
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as e:
+        print(f"Skipping kwargs due to {type(e).__name__}: {e}")
         pass
+    except Exception as e:
+        print(f"Unexpected error with kwargs {kwargs}: {e}")
+        traceback.print_exc()
+
+if not success:
+    print("Could not initialize PaddleOCR using any parameter combination.")
+    sys.exit(1)
 
 print("PaddleOCR models ready")
 PY

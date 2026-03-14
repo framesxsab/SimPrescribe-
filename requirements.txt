@@ -3,6 +3,7 @@ huggingface_hub
 httpx
 jinja2
 pandas
+numpy<2
 paddleocr
 paddlepaddle
 Pillow
