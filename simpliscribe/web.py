@@ -99,14 +99,17 @@ async def analyze(file: UploadFile = File(...)) -> JSONResponse:
     stored_file = await save_upload(file)
     try:
         raw_text = extract_ocr_text(stored_file)
-        medications = structure_medications(raw_text)
+        parsed = structure_medications(raw_text)
         analysis_id = str(uuid.uuid4())
         record = {
             "id": analysis_id,
             "filename": stored_file.name.split("_", 1)[1] if "_" in stored_file.name else stored_file.name,
             "created_at": utc_now_iso(),
             "raw_text": raw_text,
-            "medications": medications,
+            "patient_name": parsed.get("patient_name", "N/A"),
+            "doctor_name": parsed.get("doctor_name", "N/A"),
+            "date": parsed.get("date", "N/A"),
+            "medications": parsed.get("medications", []),
         }
         append_history(record)
         return JSONResponse(content={"analysis_id": analysis_id, **record})
