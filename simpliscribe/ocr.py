@@ -23,8 +23,8 @@ def _collect_paddle_text(results: Any) -> list[str]:
         # PaddleOCR 3.0+ / Paddlex returns objects or dictionaries with a "rec_text" property
         if hasattr(page_result, "keys") and hasattr(page_result, "__getitem__"):
             # Using dict access
-            if "rec_text" in page_result:
-                texts = page_result["rec_text"]
+            if "rec_texts" in page_result:
+                texts = page_result["rec_texts"]
                 if isinstance(texts, list):
                     segments.extend([str(t).strip() for t in texts if str(t).strip()])
                 elif isinstance(texts, str) and texts.strip():
@@ -32,8 +32,8 @@ def _collect_paddle_text(results: Any) -> list[str]:
                 continue
 
         # If it's a PaddleX result object with attributes
-        if hasattr(page_result, "rec_text"):
-            texts = page_result.rec_text
+        if hasattr(page_result, "rec_texts"):
+            texts = page_result.rec_texts
             if isinstance(texts, list):
                 segments.extend([str(t).strip() for t in texts if str(t).strip()])
             elif isinstance(texts, str) and texts.strip():
@@ -157,12 +157,6 @@ def extract_ocr_text(file_path: Path) -> str:
                 results = reader.ocr(str(path), cls=True)
             except TypeError:
                 results = reader.ocr(str(path))
-            
-            print(f"DEBUG OCR RESULTS TYPE: {type(results)}")
-            try:
-                print(f"DEBUG OCR RESULTS REPR: {repr(results)}")
-            except Exception as e:
-                print(f"DEBUG REPR ERROR: {e}")
                 
             segments.extend(_collect_paddle_text(results))
         return " ".join(segments)
