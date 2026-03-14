@@ -157,6 +157,13 @@ def extract_ocr_text(file_path: Path) -> str:
                 results = reader.ocr(str(path), cls=True)
             except TypeError:
                 results = reader.ocr(str(path))
+            
+            print(f"DEBUG OCR RESULTS TYPE: {type(results)}")
+            try:
+                print(f"DEBUG OCR RESULTS REPR: {repr(results)}")
+            except Exception as e:
+                print(f"DEBUG REPR ERROR: {e}")
+                
             segments.extend(_collect_paddle_text(results))
         return " ".join(segments)
     finally:
