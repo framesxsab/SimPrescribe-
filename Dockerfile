@@ -32,10 +32,10 @@ except Exception as e:
 
 success = False
 for kwargs in (
-    {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True, 'show_log': False},
-    {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True},
-    {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False, 'show_log': False},
-    {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False}
+    {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True, 'show_log': False, 'enable_mkldnn': False},
+    {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True, 'enable_mkldnn': False},
+    {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False, 'show_log': False, 'enable_mkldnn': False},
+    {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False, 'enable_mkldnn': False}
 ):
     try:
         print(f"Trying to initialize PaddleOCR with kwargs: {kwargs}")
