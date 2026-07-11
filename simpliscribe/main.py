@@ -1,4 +1,3 @@
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -8,28 +7,36 @@ from .config import settings
 from .storage import load_history
 from .web import analyze, download_report, history_payload, render_dashboard, render_details, render_history
 
-load_dotenv()
 load_history()
-
-# Pre-warm heavy resources at startup to avoid slow first request
-import threading
-def _preload():
-    try:
-        from .inference import load_medicine_lexicon
-        load_medicine_lexicon()
-    except Exception:
-        pass
-    try:
-        from .ocr import get_ocr_reader
-        get_ocr_reader()
-    except Exception:
-        pass
-
-threading.Thread(target=_preload, daemon=True).start()
 
 app = FastAPI(title=f"{settings.app_name} API")
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+
+
+@app.middleware("http")
+async def protect_health_data_responses(request: Request, call_next):
+    response = await call_next(request)
+    if not request.url.path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
+
+
+@app.get("/api/health")
+async def health() -> dict:
+    datasets_ready = settings.india_medicine_dataset.exists() and settings.medicine_database_dataset.exists()
+    provider_ready = settings.inference_provider == "fallback" or bool(
+        settings.hf_token if settings.inference_provider == "huggingface" else settings.model_api_url
+    )
+    return {
+        "status": "ready" if datasets_ready and provider_ready else "degraded",
+        "datasets_ready": datasets_ready,
+        "configured_provider": settings.inference_provider,
+        "provider_ready": provider_ready,
+        "clinical_use": "human_review_required",
+    }
 
 
 @app.get("/", response_class=HTMLResponse)

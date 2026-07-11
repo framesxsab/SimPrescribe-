@@ -91,6 +91,14 @@ class MedicineEntry:
     sources: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class MedicineMatch:
+    entry: MedicineEntry
+    confidence: float
+    method: str
+    matched_alias: str
+
+
 def normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", value.lower())).strip()
 
@@ -226,13 +234,12 @@ def load_medicine_lexicon() -> dict[str, MedicineEntry]:
         entries[key] = merge_entries(entries.get(key), entry)
         return key
 
-    def read_csv(path: Path):
-        if not path.exists():
-            return []
-        with path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
-            return list(csv.DictReader(handle))
+    def rows(path: Path):
+        if path.exists():
+            with path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
+                yield from csv.DictReader(handle)
 
-    for row in read_csv(settings.india_medicine_dataset):
+    for row in rows(settings.india_medicine_dataset):
         name = clean_value(row.get("name"))
         if not name:
             continue
@@ -264,7 +271,7 @@ def load_medicine_lexicon() -> dict[str, MedicineEntry]:
         short_alias = re.sub(r"\b(tablet|capsule|syrup|cream|suspension|injection|oral suspension)\b", "", name, flags=re.IGNORECASE).strip()
         add_alias(short_alias, key)
 
-    for row in read_csv(settings.medicine_database_dataset):
+    for row in rows(settings.medicine_database_dataset):
         name = clean_value(row.get("name"))
         if not name:
             continue
@@ -294,7 +301,15 @@ def load_medicine_lexicon() -> dict[str, MedicineEntry]:
     return {alias: entries[key] for alias, key in alias_to_key.items() if key in entries}
 
 
-def find_best_medicine_match(segment: str) -> MedicineEntry | None:
+@lru_cache(maxsize=1)
+def medicine_prefix_index() -> dict[str, tuple[str, ...]]:
+    grouped: dict[str, list[str]] = {}
+    for alias in load_medicine_lexicon():
+        grouped.setdefault(alias[:3], []).append(alias)
+    return {prefix: tuple(aliases) for prefix, aliases in grouped.items()}
+
+
+def find_medicine_match(segment: str) -> MedicineMatch | None:
     lexicon = load_medicine_lexicon()
     if not lexicon:
         return None
@@ -306,23 +321,31 @@ def find_best_medicine_match(segment: str) -> MedicineEntry | None:
     # Fast exact match first
     for candidate in candidates:
         if candidate in lexicon:
-            return lexicon[candidate]
+            return MedicineMatch(lexicon[candidate], 1.0, "exact", candidate)
 
     # Prefix-based fuzzy match: only compare against aliases that share
     # the same first 3 characters to avoid brute-force O(n) scan
     best_entry: MedicineEntry | None = None
     best_score = 0.0
+    best_alias = ""
     for candidate in candidates:
         prefix = candidate[:3] if len(candidate) >= 3 else candidate
-        for alias, entry in lexicon.items():
-            if not alias.startswith(prefix):
-                continue
+        for alias in medicine_prefix_index().get(prefix, ()):
+            entry = lexicon[alias]
             score = SequenceMatcher(None, candidate, alias).ratio()
             if score > best_score:
                 best_score = score
                 best_entry = entry
+                best_alias = alias
 
-    return best_entry if best_score >= 0.92 else None
+    if best_entry is not None and best_score >= 0.92:
+        return MedicineMatch(best_entry, best_score, "fuzzy", best_alias)
+    return None
+
+
+def find_best_medicine_match(segment: str) -> MedicineEntry | None:
+    match = find_medicine_match(segment)
+    return match.entry if match else None
 
 
 def split_segments(raw_text: str) -> list[str]:
@@ -450,7 +473,7 @@ def build_insight(entry: MedicineEntry | None, frequency: str, duration: str, fo
     return " ".join(parts)
 
 
-def dataset_payload(entry: MedicineEntry | None) -> dict[str, Any]:
+def dataset_payload(entry: MedicineEntry | None, match: MedicineMatch | None = None) -> dict[str, Any]:
     if entry is None:
         return {
             "source": "OCR only",
@@ -464,6 +487,7 @@ def dataset_payload(entry: MedicineEntry | None) -> dict[str, Any]:
             "substitutes": [],
             "uses": [],
             "side_effects": [],
+            "dataset_match": None,
         }
 
     return {
@@ -478,6 +502,11 @@ def dataset_payload(entry: MedicineEntry | None) -> dict[str, Any]:
         "substitutes": list(entry.substitutes),
         "uses": list(entry.uses),
         "side_effects": list(entry.side_effects),
+        "dataset_match": {
+            "method": match.method,
+            "confidence": round(match.confidence, 4),
+            "matched_alias": match.matched_alias,
+        } if match else None,
     }
 
 
@@ -605,6 +634,7 @@ def build_medication_record(
     duration: str,
     insight: str,
     entry: MedicineEntry | None,
+    match: MedicineMatch | None = None,
 ) -> dict[str, Any]:
     resolved_category = category.strip() or "General"
     if resolved_category.lower() == "general" and entry and entry.category:
@@ -624,7 +654,19 @@ def build_medication_record(
         "duration": normalized_duration,
         "insight": insight.strip() or DEFAULT_INSIGHT,
     }
-    payload.update(dataset_payload(entry))
+    review_reasons: list[str] = []
+    if payload["name"] == "Unknown medication" or entry is None:
+        review_reasons.append("Medicine name was not confirmed against the reference datasets.")
+    elif match and match.method == "fuzzy":
+        review_reasons.append("Medicine name was fuzzy-matched and must be confirmed.")
+    for field in ("dosage", "duration"):
+        if payload[field] == "N/A":
+            review_reasons.append(f"{field.title()} was not captured.")
+    if payload["frequency"] == "Refer to prescription":
+        review_reasons.append("Frequency was not captured.")
+    payload["requires_review"] = bool(review_reasons)
+    payload["review_reasons"] = review_reasons
+    payload.update(dataset_payload(entry, match))
     return payload
 
 
@@ -808,7 +850,8 @@ def enrich_medications(medications: list[dict[str, Any]]) -> list[dict[str, Any]
     normalized: list[dict[str, Any]] = []
     for medication in medications:
         name = str(medication.get("name") or "Unknown medication").strip()
-        entry = find_best_medicine_match(name)
+        match = find_medicine_match(name)
+        entry = match.entry if match else None
         normalized.append(
             build_medication_record(
                 name=name,
@@ -819,6 +862,7 @@ def enrich_medications(medications: list[dict[str, Any]]) -> list[dict[str, Any]
                 duration=str(medication.get("duration") or "N/A"),
                 insight=str(medication.get("insight") or DEFAULT_INSIGHT),
                 entry=entry,
+                match=match,
             )
         )
     return normalized
@@ -921,6 +965,7 @@ def call_http_endpoint(raw_text: str) -> dict[str, Any]:
 
     if not isinstance(medications, list):
         raise ValueError("Endpoint returned an invalid medications payload.")
+    medications = refine_model_medications(raw_text, medications)
     parsed["medications"] = filter_junk_medications(enrich_medications(medications))
     for key in ["patient_name", "doctor_name", "date"]:
         if key not in parsed:
@@ -933,7 +978,8 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
     medications: list[dict[str, Any]] = []
     for segment in candidates[:6]:
         derived_name = extract_candidate_name(segment)
-        entry = find_best_medicine_match(derived_name if derived_name != "Unknown medication" else segment)
+        match = find_medicine_match(derived_name if derived_name != "Unknown medication" else segment)
+        entry = match.entry if match else None
         dosage_form = extract_form(segment)
         duration = extract_duration(segment)
         frequency = extract_frequency(segment)
@@ -952,6 +998,7 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
                 duration=duration,
                 insight=build_insight(entry, frequency, duration, dosage_form),
                 entry=entry,
+                match=match,
             )
         )
 
@@ -962,6 +1009,22 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
         "date": "N/A",
         "medications": medications
     }
+
+
+def add_pipeline_metadata(
+    result: dict[str, Any],
+    *,
+    requested_provider: str,
+    used_provider: str,
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    result["pipeline"] = {
+        "requested_provider": requested_provider,
+        "used_provider": used_provider,
+        "warnings": warnings or [],
+        "human_review_required": True,
+    }
+    return result
 
 
 def structure_medications(raw_text: str) -> dict[str, Any]:
@@ -977,21 +1040,36 @@ def structure_medications(raw_text: str) -> dict[str, Any]:
     if provider == "huggingface":
         if settings.hf_token:
             try:
-                return call_huggingface(raw_text)
-            except Exception as exc:
-                import traceback
-                logger.error("HuggingFace inference failed, falling back to heuristic parser:\n%s", traceback.format_exc())
+                return add_pipeline_metadata(
+                    call_huggingface(raw_text), requested_provider=provider, used_provider="huggingface"
+                )
+            except Exception:
+                logger.exception("HuggingFace inference failed; using the heuristic parser.")
         else:
             logger.warning("No HF token set, using heuristic fallback parser.")
-        return fallback_extract(raw_text)
+        return add_pipeline_metadata(
+            fallback_extract(raw_text),
+            requested_provider=provider,
+            used_provider="fallback",
+            warnings=["The configured model was unavailable; rule-based extraction was used."],
+        )
 
     if provider == "endpoint":
         try:
-            return call_http_endpoint(raw_text)
+            return add_pipeline_metadata(
+                call_http_endpoint(raw_text), requested_provider=provider, used_provider="endpoint"
+            )
         except Exception as exc:
             logger.warning("Endpoint inference failed, falling back: %s", exc)
-            return fallback_extract(raw_text)
+            return add_pipeline_metadata(
+                fallback_extract(raw_text),
+                requested_provider=provider,
+                used_provider="fallback",
+                warnings=["The configured model endpoint was unavailable; rule-based extraction was used."],
+            )
 
     if provider == "fallback":
-        return fallback_extract(raw_text)
+        return add_pipeline_metadata(
+            fallback_extract(raw_text), requested_provider=provider, used_provider="fallback"
+        )
     raise ValueError(f"Unsupported inference provider: {settings.inference_provider}")

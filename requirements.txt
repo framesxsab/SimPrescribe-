@@ -3,9 +3,8 @@ huggingface_hub
 httpx
 jinja2
 pandas
-numpy<2
-paddleocr
-paddlepaddle
+paddleocr==3.4.0
+paddlepaddle==3.2.2
 Pillow
 PyMuPDF
 pyarrow

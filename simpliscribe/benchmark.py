@@ -170,13 +170,36 @@ def score_case(case: dict[str, Any], actual: list[dict[str, Any]]) -> CaseScore:
     matched_fields = 0
     total_fields = 0
 
-    for index in range(max(len(expected), len(actual))):
-        expected_med = expected[index] if index < len(expected) else {}
-        actual_med = actual[index] if index < len(actual) else {}
+    # Extraction order is not clinically meaningful. Pair each expected row
+    # with the remaining actual row that matches the most labelled fields,
+    # then score any unmatched actual rows as false positives.
+    unmatched_actual = list(enumerate(actual))
+    aligned_rows: list[tuple[dict[str, Any], dict[str, Any], int | None]] = []
+    for expected_med in expected:
+        if unmatched_actual:
+            actual_position, actual_med = max(
+                unmatched_actual,
+                key=lambda item: sum(
+                    normalize_for_score(expected_med.get(field, ""))
+                    == normalize_for_score(item[1].get(field, ""))
+                    and bool(normalize_for_score(expected_med.get(field, "")))
+                    for field in SCORABLE_FIELDS
+                ),
+            )
+            unmatched_actual.remove((actual_position, actual_med))
+            aligned_rows.append((expected_med, actual_med, actual_position))
+        else:
+            aligned_rows.append((expected_med, {}, None))
+    aligned_rows.extend(({}, actual_med, actual_position) for actual_position, actual_med in unmatched_actual)
+
+    for index, (expected_med, actual_med, actual_position) in enumerate(aligned_rows):
         for field in SCORABLE_FIELDS:
             expected_value = normalize_for_score(expected_med.get(field, ""))
             actual_value = normalize_for_score(actual_med.get(field, ""))
-            if expected_value:
+            # Expected fields measure extraction accuracy. Fields on an extra
+            # medication are false positives and must also count against the
+            # score; otherwise a model can hallucinate drugs and still earn 1.0.
+            if expected_value or (not expected_med and actual_value):
                 total_fields += 1
             matched = expected_value == actual_value and expected_value != ""
             if matched:
@@ -184,6 +207,7 @@ def score_case(case: dict[str, Any], actual: list[dict[str, Any]]) -> CaseScore:
             field_results.append(
                 {
                     "medication_index": index,
+                    "actual_medication_index": actual_position,
                     "field": field,
                     "matched": matched,
                     "expected": expected_med.get(field, ""),
@@ -255,7 +279,10 @@ def run_case(case: dict[str, Any], base_dir: Path | None = None, retries: int = 
     last_error = ""
     for attempt in range(retries + 1):
         try:
-            actual = structure_medications(raw_text)
+            result = structure_medications(raw_text)
+            actual = result.get("medications", []) if isinstance(result, dict) else result
+            if not isinstance(actual, list):
+                raise ValueError("Extraction pipeline returned an invalid medication list.")
             hydrated_case = dict(case)
             hydrated_case["raw_text"] = raw_text
             return score_case(hydrated_case, actual)

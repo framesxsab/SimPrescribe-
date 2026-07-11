@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .config import settings
 from .inference import structure_medications
-from .ocr import extract_ocr_text
+from .ocr import extract_ocr_result, validate_document
 from .reporting import build_pdf_report
 from .storage import append_history, get_analysis_record, load_history
 
@@ -48,6 +48,11 @@ async def save_upload(file: UploadFile) -> Path:
     stored_name = f"{uuid.uuid4()}_{safe_name}"
     file_path = settings.uploads_dir / stored_name
     file_path.write_bytes(contents)
+    try:
+        validate_document(file_path)
+    except ValueError as exc:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return file_path
 
 
@@ -98,29 +103,57 @@ async def download_report(analysis_id: str) -> Response:
 async def analyze(file: UploadFile = File(...)) -> JSONResponse:
     stored_file = await save_upload(file)
     try:
-        raw_text = extract_ocr_text(stored_file)
-        parsed = structure_medications(raw_text)
+        ocr_result = extract_ocr_result(stored_file)
+        parsed = structure_medications(ocr_result.text)
+        medications = parsed.get("medications", [])
+        if not isinstance(medications, list):
+            raise ValueError("The extraction pipeline returned an invalid medication list.")
+        pipeline = dict(parsed.get("pipeline") or {})
+        pipeline["ocr_confidence"] = round(ocr_result.confidence, 4) if ocr_result.confidence is not None else None
+        pipeline["ocr_warnings"] = list(ocr_result.warnings)
+        pipeline["human_review_required"] = True
         analysis_id = str(uuid.uuid4())
         record = {
             "id": analysis_id,
             "filename": stored_file.name.split("_", 1)[1] if "_" in stored_file.name else stored_file.name,
             "created_at": utc_now_iso(),
-            "raw_text": raw_text,
+            "raw_text": ocr_result.text,
             "patient_name": parsed.get("patient_name", "N/A"),
             "doctor_name": parsed.get("doctor_name", "N/A"),
             "date": parsed.get("date", "N/A"),
-            "medications": parsed.get("medications", []),
+            "medications": medications,
+            "pipeline": pipeline,
+            "review_status": "needs_review",
         }
         append_history(record)
-        return JSONResponse(content={"analysis_id": analysis_id, **record})
+        return JSONResponse(
+            content={"analysis_id": analysis_id, **record},
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
     except HTTPException:
         raise
-    except Exception as exc:
+    except ValueError:
+        logger.exception("Prescription analysis rejected because the result was not usable.")
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "No reliable prescription text could be extracted. Try a clearer scan and review the original prescription.",
+                "error_code": "UNUSABLE_PRESCRIPTION",
+                "medications": [],
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception:
         logger.exception("Prescription analysis failed.")
-        message = str(exc)
-        if "PDX has already been initialized" in message:
-            message = "OCR engine is warming up. Please retry in a few seconds."
-        return JSONResponse(status_code=500, content={"error": message, "medications": []})
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Prescription analysis is temporarily unavailable. Please retry without relying on a partial result.",
+                "error_code": "ANALYSIS_FAILED",
+                "medications": [],
+            },
+            headers={"Cache-Control": "no-store"},
+        )
     finally:
         if stored_file.exists():
             stored_file.unlink()

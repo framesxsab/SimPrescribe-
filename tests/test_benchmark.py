@@ -243,3 +243,53 @@ def test_load_cases_supports_complex_dosage_formats(tmp_path):
     assert cases[0]["expected_medications"][0]["name"] == "Ambroxol"
     assert cases[0]["expected_medications"][0]["dosage"] == "5 mg/5 ml"
     assert cases[0]["expected_medications"][0]["frequency"] == "Refer to prescription"
+
+
+def test_score_case_penalizes_extra_medications():
+    expected = {
+        "name": "Cetirizine",
+        "type": "Tablet",
+        "dosage": "10 mg",
+        "frequency": "once daily",
+        "duration": "5 days",
+    }
+    extra = {**expected, "name": "Paracetamol"}
+
+    result = score_case({"id": "extra-drug", "expected_medications": [expected]}, [expected, extra])
+
+    assert result.matched_fields == 5
+    assert result.total_fields == 10
+    assert result.score == 0.5
+    assert result.actual_count == 2
+
+
+def test_score_case_does_not_score_unspecified_expected_fields():
+    case = {"id": "name-only", "expected_medications": [{"name": "Cetirizine"}]}
+    actual = [{
+        "name": "Cetirizine",
+        "type": "Tablet",
+        "dosage": "10 mg",
+        "frequency": "once daily",
+        "duration": "5 days",
+    }]
+
+    result = score_case(case, actual)
+
+    assert result.matched_fields == 1
+    assert result.total_fields == 1
+    assert result.score == 1.0
+
+
+def test_score_case_matches_medications_independent_of_order():
+    cetirizine = {"name": "Cetirizine", "dosage": "10 mg", "frequency": "at bedtime"}
+    paracetamol = {"name": "Paracetamol", "dosage": "650 mg", "frequency": "once daily"}
+
+    result = score_case(
+        {"id": "reordered", "expected_medications": [cetirizine, paracetamol]},
+        [paracetamol, cetirizine],
+    )
+
+    assert result.matched_fields == 6
+    assert result.total_fields == 6
+    assert result.score == 1.0
+    assert result.field_results[0]["actual_medication_index"] == 1

@@ -1,11 +1,16 @@
+from io import BytesIO
+
 import fitz
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from simpliscribe.main import app
 from simpliscribe.inference import fallback_extract
 from simpliscribe.inference import build_medication_record
 from simpliscribe.inference import refine_model_medications
+from simpliscribe.ocr import OCRLine, OCRResult
 from simpliscribe.storage import append_history, load_history, save_history
+from simpliscribe.config import settings
 
 
 client = TestClient(app)
@@ -22,9 +27,76 @@ def test_history_api_route():
     assert "analyses" in response.json()
 
 
+def test_health_route_exposes_review_boundary():
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["clinical_use"] == "human_review_required"
+
+
+def test_analyze_preserves_parsed_contract_and_pipeline_metadata(monkeypatch):
+    original_history = load_history()
+    monkeypatch.setattr(
+        "simpliscribe.web.extract_ocr_result",
+        lambda _: OCRResult(
+            "Paracetamol 650 mg tab od 5 days",
+            0.94,
+            (OCRLine("Paracetamol 650 mg tab od 5 days", 0.94),),
+            (),
+        ),
+    )
+    monkeypatch.setattr(
+        "simpliscribe.web.structure_medications",
+        lambda _: {
+            "patient_name": "A Patient",
+            "doctor_name": "Dr. B",
+            "date": "2026-07-10",
+            "medications": [{"name": "Paracetamol", "requires_review": True}],
+            "pipeline": {"used_provider": "fallback", "warnings": []},
+        },
+    )
+
+    image_buffer = BytesIO()
+    Image.new("RGB", (1, 1), "white").save(image_buffer, format="PNG")
+    image = image_buffer.getvalue()
+    try:
+        response = client.post("/api/analyze", files={"file": ("rx.png", image, "image/png")})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["medications"] == [{"name": "Paracetamol", "requires_review": True}]
+        assert payload["patient_name"] == "A Patient"
+        assert payload["pipeline"]["ocr_confidence"] == 0.94
+        assert payload["review_status"] == "needs_review"
+        assert response.headers["cache-control"] == "no-store"
+    finally:
+        save_history(original_history)
+
+
+def test_analyze_rejects_spoofed_image_and_removes_upload():
+    before = {path.name for path in settings.uploads_dir.iterdir()}
+
+    response = client.post("/api/analyze", files={"file": ("fake.png", b"not an image", "image/png")})
+
+    assert response.status_code == 400
+    assert "not a valid supported image" in response.json()["detail"]
+    assert {path.name for path in settings.uploads_dir.iterdir()} == before
+
+
+def test_analyze_removes_upload_when_ocr_is_unusable(monkeypatch):
+    before = {path.name for path in settings.uploads_dir.iterdir()}
+    monkeypatch.setattr("simpliscribe.web.extract_ocr_result", lambda _: (_ for _ in ()).throw(ValueError("unusable")))
+    image_buffer = BytesIO()
+    Image.new("RGB", (2, 2), "white").save(image_buffer, format="PNG")
+
+    response = client.post("/api/analyze", files={"file": ("rx.png", image_buffer.getvalue(), "image/png")})
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "UNUSABLE_PRESCRIPTION"
+    assert {path.name for path in settings.uploads_dir.iterdir()} == before
+
+
 def test_fallback_extract_handles_multiline_prescriptions():
     raw_text = "Paracetamol 650 tab od 5 days\nAmoxycillin 500 cap bd 5 days"
-    medications = fallback_extract(raw_text)
+    medications = fallback_extract(raw_text)["medications"]
 
     assert len(medications) >= 2
     assert medications[0]["name"]
@@ -125,6 +197,11 @@ def test_report_download_pdf_contains_expected_content():
         "id": "test-report-content-id",
         "filename": "sample prescription.pdf",
         "created_at": "2026-03-11T12:00:00+00:00",
+        "patient_name": "Ananya Sharma",
+        "doctor_name": "Dr. Meera Rao",
+        "date": "2026-03-11",
+        "review_status": "needs_review",
+        "pipeline": {"ocr_confidence": 0.87},
         "raw_text": "Paracetamol 650 tab od 5 days",
         "medications": [
             {
@@ -146,6 +223,8 @@ def test_report_download_pdf_contains_expected_content():
                 "substitutes": ["Dolo 650"],
                 "uses": ["Fever"],
                 "side_effects": ["Nausea"],
+                "requires_review": True,
+                "review_reasons": ["Medicine name must be confirmed."],
             }
         ],
     }
@@ -161,9 +240,14 @@ def test_report_download_pdf_contains_expected_content():
         extracted_text = "\n".join(page.get_text() for page in document)
 
         assert "Prescription Analysis Report" in extracted_text
+        assert "Ananya Sharma" in extracted_text
+        assert "Dr. Meera Rao" in extracted_text
+        assert "87%" in extracted_text
         assert "Paracetamol" in extracted_text
         assert "ABC Pharma" in extracted_text
         assert "Use as directed." in extracted_text
         assert "Paracetamol 650 tab od 5 days" in extracted_text
+        assert "Needs review" in extracted_text
+        assert "Medicine name must be confirmed." in extracted_text
     finally:
         save_history(original_history)

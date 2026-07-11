@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-12T06:07:43.443993+00:00",
+  "generated_at": "2026-07-11T02:02:33.512235+00:00",
   "case_count": 2,
   "success_count": 2,
   "failure_count": 0,
@@ -25,6 +25,8 @@
           "frequency": "once daily",
           "duration": "5 days",
           "insight": "Contains Paracetamol (500mg). Take once daily for 5 days.",
+          "requires_review": false,
+          "review_reasons": [],
           "source": "India Medicines Dataset, Medicine Database",
           "source_datasets": [
             "India Medicines Dataset",
@@ -51,7 +53,12 @@
             "Stomach pain",
             "Nausea",
             "Vomiting"
-          ]
+          ],
+          "dataset_match": {
+            "method": "exact",
+            "confidence": 1.0,
+            "matched_alias": "paracetamol"
+          }
         }
       ],
       "field_results": [
@@ -113,6 +120,10 @@
           "frequency": "twice daily",
           "duration": "5 days",
           "insight": "Take twice daily for 5 days.",
+          "requires_review": true,
+          "review_reasons": [
+            "Medicine name was not confirmed against the reference datasets."
+          ],
           "source": "OCR only",
           "source_datasets": [],
           "composition": "",
@@ -123,7 +134,8 @@
           "action_class": "",
           "substitutes": [],
           "uses": [],
-          "side_effects": []
+          "side_effects": [],
+          "dataset_match": null
         },
         {
           "name": "Cetirizine",
@@ -133,6 +145,10 @@
           "frequency": "at bedtime",
           "duration": "3 days",
           "insight": "Contains Cetirizine (10mg). Take at bedtime for 3 days.",
+          "requires_review": true,
+          "review_reasons": [
+            "Medicine name was fuzzy-matched and must be confirmed."
+          ],
           "source": "India Medicines Dataset, Medicine Database",
           "source_datasets": [
             "India Medicines Dataset",
@@ -157,7 +173,12 @@
           "side_effects": [
             "Sleepiness",
             "Dizziness"
-          ]
+          ],
+          "dataset_match": {
+            "method": "fuzzy",
+            "confidence": 0.9474,
+            "matched_alias": "cetrizine"
+          }
         }
       ],
       "field_results": [

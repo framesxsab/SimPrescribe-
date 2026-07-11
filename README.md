@@ -9,6 +9,14 @@ pinned: false
 
 SimpliScribe is a FastAPI application that simplifies prescription reading by extracting text from prescription images or PDFs and turning that OCR output into a structured medication summary.
 
+## Safety and intended use
+
+SimpliScribe is an open-source **review aid**, not a prescribing, diagnosis, dispensing, or autonomous clinical decision system. Every medicine name, strength, route, frequency, duration, interaction, and dataset reference candidate must be checked against the original prescription by a qualified clinician or pharmacist. The current benchmark contains only two synthetic text cases and is a regression check, not evidence of clinical accuracy.
+
+The application preserves OCR line boundaries, exposes OCR confidence and provider provenance, marks uncertain fields for review, validates actual file content, deletes uploads after processing, and labels dataset alternatives as reference candidates rather than recommendations.
+
+Do not expose the current local JSON history store to public or multi-user healthcare traffic. A real deployment still needs authenticated role-based access, consent, encrypted database storage, audit logs, retention controls, a threat model, licensed/versioned medicine sources, and prospective clinical validation.
+
 ## Open-source local stack
 
 - OCR runs locally with PaddleOCR.
@@ -142,6 +150,18 @@ Recommended workflow:
 4. Run again with `INFERENCE_PROVIDER=endpoint` and your local model server.
 5. Compare the saved benchmark reports before changing prompts or models.
 
+For a clinically meaningful evaluation, replace the samples with de-identified, consented prescriptions adjudicated by qualified reviewers. Report medication-name precision/recall, exact strength/frequency/duration accuracy, unreadable-scan rejection, subgroup performance, and false confident matches. Do not promote a model based on one aggregate score.
+
+## Practical roadmap
+
+1. Build a versioned golden set with reviewer agreement and look-alike/sound-alike cases.
+2. Compare every OCR or model proposal on that same set and adopt only measured improvements.
+3. Replace unverified CSV provenance with licensed, versioned sources and stable medicine identifiers.
+4. Move history to authenticated, encrypted storage with tenant isolation and review audit events.
+5. Complete security, accessibility, workflow, and prospective clinical validation before production use.
+
+Code is MIT licensed. Dataset files may have separate upstream terms; verify and document those terms before redistribution.
+
 ## Docker deployment
 
 ```bash
@@ -180,6 +200,9 @@ HF_CHAT_MODEL=Qwen/Qwen2.5-7B-Instruct
 MODEL_API_URL=
 MODEL_API_KEY=
 MAX_UPLOAD_MB=10
+MAX_PDF_PAGES=10
+MAX_IMAGE_PIXELS=40000000
+MIN_OCR_CONFIDENCE=0.80
 REQUEST_TIMEOUT_SECONDS=60
 ```
 

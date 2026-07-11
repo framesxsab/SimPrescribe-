@@ -1,6 +1,7 @@
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from dataclasses import dataclass
 
 import fitz
 from PIL import Image
@@ -12,50 +13,64 @@ _ocr_reader: Any | None = None
 _ocr_reader_lock = Lock()
 
 
-def _collect_paddle_text(results: Any) -> list[str]:
-    segments: list[str] = []
-    
-    # Handle the case where results is a single paddle object or dict instead of a list
-    if not isinstance(results, (list, tuple)):
-        results = [results]
+@dataclass(frozen=True)
+class OCRLine:
+    text: str
+    confidence: float | None = None
 
-    for page_result in results:
-        # PaddleOCR 3.0+ / Paddlex returns objects or dictionaries with a "rec_text" property
-        if hasattr(page_result, "keys") and hasattr(page_result, "__getitem__"):
-            # Using dict access
-            if "rec_texts" in page_result:
-                texts = page_result["rec_texts"]
-                if isinstance(texts, list):
-                    segments.extend([str(t).strip() for t in texts if str(t).strip()])
-                elif isinstance(texts, str) and texts.strip():
-                    segments.append(texts.strip())
-                continue
 
-        # If it's a PaddleX result object with attributes
-        if hasattr(page_result, "rec_texts"):
-            texts = page_result.rec_texts
-            if isinstance(texts, list):
-                segments.extend([str(t).strip() for t in texts if str(t).strip()])
-            elif isinstance(texts, str) and texts.strip():
-                segments.append(texts.strip())
+@dataclass(frozen=True)
+class OCRResult:
+    text: str
+    confidence: float | None
+    lines: tuple[OCRLine, ...]
+    warnings: tuple[str, ...]
+
+
+def _as_confidence(value: Any) -> float | None:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    return score if 0 <= score <= 1 else None
+
+
+def _collect_paddle_lines(results: Any) -> list[OCRLine]:
+    """Support PaddleOCR 2.x nested lists and 3.x PaddleX result objects."""
+    pages = results if isinstance(results, (list, tuple)) else [results]
+    lines: list[OCRLine] = []
+    for page in pages:
+        texts = None
+        scores = None
+        if isinstance(page, dict):
+            texts, scores = page.get("rec_texts"), page.get("rec_scores")
+        else:
+            texts = getattr(page, "rec_texts", None)
+            scores = getattr(page, "rec_scores", None)
+        if isinstance(texts, (list, tuple)):
+            score_values = scores if isinstance(scores, (list, tuple)) else []
+            for index, value in enumerate(texts):
+                text = str(value).strip()
+                if text:
+                    score = score_values[index] if index < len(score_values) else None
+                    lines.append(OCRLine(text, _as_confidence(score)))
             continue
 
-        # Fallback to PaddleOCR 2.x standard List[List[Box, (Text, Score)]]
-        if not isinstance(page_result, list):
+        if not isinstance(page, list):
             continue
-            
-        for line in page_result:
-            if not isinstance(line, (list, tuple)) or len(line) < 2:
+        for item in page:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
                 continue
-            candidate = line[1]
+            candidate = item[1]
             if isinstance(candidate, (list, tuple)) and candidate:
                 text = str(candidate[0]).strip()
                 if text:
-                    segments.append(text)
-            elif isinstance(candidate, str) and candidate.strip():
-                segments.append(candidate.strip())
+                    lines.append(OCRLine(text, _as_confidence(candidate[1] if len(candidate) > 1 else None)))
+    return lines
 
-    return segments
+
+def _collect_paddle_text(results: Any) -> list[str]:
+    return [line.text for line in _collect_paddle_lines(results)]
 
 
 def get_ocr_reader() -> Any:
@@ -85,26 +100,22 @@ def get_ocr_reader() -> Any:
                 "device": "gpu" if settings.ocr_use_gpu else "cpu",
                 "use_textline_orientation": True,
                 "show_log": False,
-                "enable_mkldnn": False,
             },
             {
                 "lang": settings.ocr_language,
                 "device": "gpu" if settings.ocr_use_gpu else "cpu",
                 "use_textline_orientation": True,
-                "enable_mkldnn": False,
             },
             {
                 "lang": settings.ocr_language,
                 "use_angle_cls": True,
                 "use_gpu": settings.ocr_use_gpu,
                 "show_log": False,
-                "enable_mkldnn": False,
             },
             {
                 "lang": settings.ocr_language,
                 "use_angle_cls": True,
                 "use_gpu": settings.ocr_use_gpu,
-                "enable_mkldnn": False,
             },
         ):
             try:
@@ -127,6 +138,10 @@ def extract_pdf_pages(file_path: Path) -> list[Path]:
     try:
         if document.page_count == 0:
             raise ValueError("The uploaded PDF does not contain any pages.")
+        if document.page_count > settings.max_pdf_pages:
+            raise ValueError(f"PDF has more than the {settings.max_pdf_pages}-page limit.")
+        if document.needs_pass:
+            raise ValueError("Password-protected PDFs are not supported.")
 
         for page_index in range(document.page_count):
             page = document.load_page(page_index)
@@ -141,7 +156,31 @@ def extract_pdf_pages(file_path: Path) -> list[Path]:
     return image_paths
 
 
-def extract_ocr_text(file_path: Path) -> str:
+def validate_document(file_path: Path) -> None:
+    if file_path.suffix.lower() == ".pdf":
+        try:
+            with fitz.open(file_path) as document:
+                if document.page_count == 0:
+                    raise ValueError("The uploaded PDF does not contain any pages.")
+                if document.page_count > settings.max_pdf_pages:
+                    raise ValueError(f"PDF has more than the {settings.max_pdf_pages}-page limit.")
+                if document.needs_pass:
+                    raise ValueError("Password-protected PDFs are not supported.")
+        except (fitz.FileDataError, fitz.EmptyFileError) as exc:
+            raise ValueError("The uploaded file is not a valid PDF.") from exc
+        return
+
+    try:
+        with Image.open(file_path) as image:
+            width, height = image.size
+            if width * height > settings.max_image_pixels:
+                raise ValueError("Image dimensions are too large to process safely.")
+            image.verify()
+    except (OSError, SyntaxError, Image.DecompressionBombError) as exc:
+        raise ValueError("The uploaded file is not a valid supported image.") from exc
+
+
+def extract_ocr_result(file_path: Path) -> OCRResult:
     reader = get_ocr_reader()
     temp_images: list[Path] = []
 
@@ -151,16 +190,30 @@ def extract_ocr_text(file_path: Path) -> str:
             input_paths = extract_pdf_pages(file_path)
             temp_images = input_paths
 
-        segments: list[str] = []
+        lines: list[OCRLine] = []
         for path in input_paths:
             try:
                 results = reader.ocr(str(path), cls=True)
             except TypeError:
                 results = reader.ocr(str(path))
-                
-            segments.extend(_collect_paddle_text(results))
-        return " ".join(segments)
+            lines.extend(_collect_paddle_lines(results))
+
+        text = "\n".join(line.text for line in lines)
+        scores = [line.confidence for line in lines if line.confidence is not None]
+        confidence = sum(scores) / len(scores) if scores else None
+        warnings: list[str] = []
+        if not text.strip():
+            warnings.append("No readable text was detected.")
+        if confidence is None:
+            warnings.append("OCR confidence was not provided by the installed engine.")
+        elif confidence < settings.min_ocr_confidence:
+            warnings.append("OCR confidence is low; every medication field requires manual review.")
+        return OCRResult(text, confidence, tuple(lines), tuple(warnings))
     finally:
         for path in temp_images:
             if path.exists():
                 path.unlink()
+
+
+def extract_ocr_text(file_path: Path) -> str:
+    return extract_ocr_result(file_path).text

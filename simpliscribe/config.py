@@ -1,8 +1,10 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,9 @@ class Settings:
     india_medicine_dataset: Path = BASE_DIR / "A_Z_medicines_dataset_of_India.csv"
     medicine_database_dataset: Path = BASE_DIR / "all_medicine databased.csv"
     max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "10"))
+    max_pdf_pages: int = int(os.environ.get("MAX_PDF_PAGES", "10"))
+    max_image_pixels: int = int(os.environ.get("MAX_IMAGE_PIXELS", "40000000"))
+    min_ocr_confidence: float = float(os.environ.get("MIN_OCR_CONFIDENCE", "0.80"))
     hf_token: str = os.environ.get("HUGGINGFACEHUB_API_TOKEN", "")
     hf_model: str = os.environ.get("HF_CHAT_MODEL", "Qwen/Qwen2.5-7B-Instruct")
     inference_provider: str = os.environ.get("INFERENCE_PROVIDER", "huggingface")

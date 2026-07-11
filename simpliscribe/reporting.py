@@ -8,7 +8,7 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import KeepTogether, PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import CondPageBreak, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 def safe_text(value: Any, fallback: str = "Not available") -> str:
@@ -47,8 +47,9 @@ def draw_page_chrome(canvas, doc, app_name: str) -> None:
     canvas.setStrokeColor(colors.HexColor("#dbe4e2"))
     canvas.setLineWidth(0.5)
     canvas.line(doc.leftMargin, A4[1] - 16 * mm, A4[0] - doc.rightMargin, A4[1] - 16 * mm)
-    canvas.setFont("Helvetica", 8)
+    canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(colors.HexColor("#64748b"))
+    canvas.drawString(doc.leftMargin, 8 * mm, "Review aid only - verify against the original prescription")
     canvas.drawRightString(A4[0] - doc.rightMargin, 8 * mm, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -79,8 +80,8 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
         pagesize=A4,
         leftMargin=14 * mm,
         rightMargin=14 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
+        topMargin=22 * mm,
+        bottomMargin=16 * mm,
         title=f"{app_name} Prescription Report",
     )
 
@@ -121,8 +122,8 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
     meta_style = ParagraphStyle(
         "Meta",
         parent=body_style,
-        fontSize=8.4,
-        leading=11,
+        fontSize=7.8,
+        leading=10,
         textColor=muted,
         textTransform="uppercase",
     )
@@ -134,6 +135,24 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
         borderWidth=0.7,
         borderPadding=8,
         borderRadius=6,
+    )
+    warning_style = ParagraphStyle(
+        "Warning",
+        parent=body_style,
+        textColor=colors.HexColor("#7c2d12"),
+        backColor=colors.HexColor("#fff7ed"),
+        borderColor=colors.HexColor("#fdba74"),
+        borderWidth=0.7,
+        borderPadding=8,
+        borderRadius=6,
+    )
+    direction_style = ParagraphStyle(
+        "Direction",
+        parent=body_style,
+        fontName="Helvetica-Bold",
+        fontSize=11,
+        leading=15,
+        textColor=ink,
     )
     hero_style = ParagraphStyle(
         "Hero",
@@ -159,12 +178,12 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
         leading=10,
         textColor=accent,
     )
-    mono_style = ParagraphStyle(
-        "Mono",
+    ocr_style = ParagraphStyle(
+        "OCR",
         parent=body_style,
         fontName="Courier",
-        fontSize=8.3,
-        leading=11,
+        fontSize=8.1,
+        leading=11.2,
         textColor=ink,
         backColor=panel,
         borderColor=colors.HexColor("#dbe4e2"),
@@ -179,6 +198,12 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
     report_id = safe_text(analysis.get("id") or analysis.get("analysis_id"))
     created_at = safe_text(analysis.get("created_at"))
     raw_text = safe_text(analysis.get("raw_text"), "No OCR text captured.")
+    patient_name = safe_text(analysis.get("patient_name"))
+    doctor_name = safe_text(analysis.get("doctor_name"))
+    prescription_date = safe_text(analysis.get("date"))
+    pipeline = analysis.get("pipeline") if isinstance(analysis.get("pipeline"), dict) else {}
+    ocr_confidence = pipeline.get("ocr_confidence")
+    confidence_text = f"{float(ocr_confidence) * 100:.0f}%" if isinstance(ocr_confidence, (int, float)) else "Not reported"
 
     brand_panel = Table(
         [
@@ -228,18 +253,16 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
     story.append(brand_panel)
     story.append(Spacer(1, 10))
 
-    summary_table = build_detail_table(
+    identity_table = build_detail_table(
         [
-            [paragraph("Document", heading_style), paragraph(file_name, body_style)],
-            [paragraph("Report ID", heading_style), paragraph(report_id, body_style)],
-            [paragraph("Analysis Time", heading_style), paragraph(created_at, body_style)],
-            [paragraph("Medication Count", heading_style), paragraph(str(len(medications)), body_style)],
-            [paragraph("Datasets", heading_style), paragraph(", ".join(dataset_names) if dataset_names else "OCR only", body_style)],
+            [paragraph("Patient", meta_style), paragraph(patient_name, body_style), paragraph("Prescriber", meta_style), paragraph(doctor_name, body_style)],
+            [paragraph("Prescription date", meta_style), paragraph(prescription_date, body_style), paragraph("Analysed", meta_style), paragraph(created_at, body_style)],
+            [paragraph("Document", meta_style), paragraph(file_name, body_style), paragraph("OCR confidence", meta_style), paragraph(confidence_text, body_style)],
         ],
-        col_widths=[42 * mm, 126 * mm],
+        col_widths=[26 * mm, 58 * mm, 26 * mm, 58 * mm],
         background="#f8fafc",
     )
-    story.append(summary_table)
+    story.append(identity_table)
     story.append(Spacer(1, 10))
     story.append(
         paragraph(
@@ -248,49 +271,77 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
         )
     )
     story.append(Spacer(1, 12))
+    story.append(paragraph(f"Medication summary ({len(medications)})", title_style))
+    story.append(paragraph("Read each direction beside the original prescription. Orange review boxes identify fields that need extra attention.", subheading_style))
+    story.append(Spacer(1, 8))
 
     for index, med in enumerate(medications, start=1):
         medication_name = safe_text(med.get("name"), "Unknown medication")
+        review_reasons = safe_list(med.get("review_reasons"))
+        requires_review = bool(med.get("requires_review")) or bool(review_reasons)
+        direction = " | ".join(
+            [
+                safe_text(med.get("dosage"), "Dose not captured"),
+                safe_text(med.get("frequency"), "Frequency not captured"),
+                safe_text(med.get("duration"), "Duration not captured"),
+            ]
+        )
 
         med_header = build_detail_table(
             [
-                [paragraph(f"Medication {index}", chip_style), paragraph(medication_name, heading_style)],
-                [paragraph("Clinical Category", meta_style), paragraph(safe_text(med.get("category"), "General"), body_style)],
+                [paragraph(f"{index:02d}", chip_style), paragraph(medication_name, title_style), paragraph("REVIEW" if requires_review else "EXTRACTED", chip_style)],
+                [paragraph("", body_style), paragraph(f"{safe_text(med.get('type'), 'Medication')} - {safe_text(med.get('category'), 'General')}", subheading_style), paragraph("", body_style)],
             ],
-            col_widths=[32 * mm, 136 * mm],
-            background="#ffffff",
+            col_widths=[12 * mm, 132 * mm, 24 * mm],
+            background="#fff7ed" if requires_review else "#f0fdfa",
+        )
+
+        direction_table = build_detail_table(
+            [[paragraph("PRESCRIBED DIRECTIONS", meta_style), paragraph(direction, direction_style)]],
+            col_widths=[42 * mm, 126 * mm],
         )
 
         med_table = build_detail_table(
             [
-                [paragraph("Type", meta_style), paragraph(safe_text(med.get("type"), "Medication"), body_style), paragraph("Source", meta_style), paragraph(safe_text(med.get("source"), "OCR only"), body_style)],
-                [paragraph("Dosage", meta_style), paragraph(safe_text(med.get("dosage"), "N/A"), body_style), paragraph("Frequency", meta_style), paragraph(safe_text(med.get("frequency"), "N/A"), body_style)],
-                [paragraph("Duration", meta_style), paragraph(safe_text(med.get("duration"), "N/A"), body_style), paragraph("Pack Size", meta_style), paragraph(safe_text(med.get("pack_size")), body_style)],
-                [paragraph("Composition", meta_style), paragraph(safe_text(med.get("composition")), body_style), paragraph("Manufacturer", meta_style), paragraph(safe_text(med.get("manufacturer")), body_style)],
-                [paragraph("Therapeutic", meta_style), paragraph(safe_text(med.get("therapeutic_class")), body_style), paragraph("Chemical", meta_style), paragraph(safe_text(med.get("chemical_class")), body_style)],
-                [paragraph("Action", meta_style), paragraph(safe_text(med.get("action_class")), body_style), paragraph("Dataset Sources", meta_style), paragraph(', '.join(safe_list(med.get("source_datasets"))) or 'OCR only', body_style)],
+                [paragraph("Composition", meta_style), paragraph(safe_text(med.get("composition")), body_style), paragraph("Maker", meta_style), paragraph(safe_text(med.get("manufacturer")), body_style)],
+                [paragraph("Pack size", meta_style), paragraph(safe_text(med.get("pack_size")), body_style), paragraph("Source", meta_style), paragraph(safe_text(med.get("source"), "OCR only"), body_style)],
             ],
-            col_widths=[24 * mm, 60 * mm, 24 * mm, 60 * mm],
+            col_widths=[28 * mm, 56 * mm, 28 * mm, 56 * mm],
         )
 
         reference_table = build_detail_table(
             [
                 [paragraph("Medication Note", meta_style), paragraph(safe_text(med.get("insight"), "Follow the prescription exactly as provided."), body_style)],
-                [paragraph("Substitutes", meta_style), paragraph(', '.join(safe_list(med.get("substitutes"))) or 'Not available', body_style)],
                 [paragraph("Common Uses", meta_style), paragraph(', '.join(safe_list(med.get("uses"))) or 'Not available', body_style)],
                 [paragraph("Side Effects", meta_style), paragraph(', '.join(safe_list(med.get("side_effects"))[:8]) or 'Not available', body_style)],
+                [paragraph("Reference candidates - not substitutes", meta_style), paragraph(', '.join(safe_list(med.get("substitutes"))[:6]) or 'Not available', body_style)],
+                [paragraph("Reference classes", meta_style), paragraph("; ".join(filter(None, [safe_text(med.get("therapeutic_class"), ""), safe_text(med.get("chemical_class"), ""), safe_text(med.get("action_class"), "")])) or "Not available", body_style)],
             ],
-            col_widths=[32 * mm, 136 * mm],
+            col_widths=[38 * mm, 130 * mm],
             background="#f8fafc",
         )
 
-        story.append(KeepTogether([med_header, Spacer(1, 5), med_table, Spacer(1, 5), reference_table, Spacer(1, 10)]))
+        medication_card: list[Any] = [med_header, Spacer(1, 4), direction_table]
+        if requires_review:
+            review_text = " ".join(f"{position}. {reason}" for position, reason in enumerate(review_reasons, start=1)) or "Confirm this medication against the original prescription."
+            medication_card.extend([Spacer(1, 4), paragraph(f"Needs review: {review_text}", warning_style)])
+        medication_card.extend([Spacer(1, 4), med_table, Spacer(1, 4), reference_table, Spacer(1, 11)])
+        story.append(CondPageBreak(82 * mm))
+        story.append(KeepTogether(medication_card))
 
-    story.append(PageBreak())
-    story.append(paragraph("OCR Extract", title_style))
-    story.append(paragraph("The raw OCR output is included below so the structured summary can be cross-checked against the extracted text.", subheading_style))
+    story.append(CondPageBreak(72 * mm))
+    story.append(paragraph("Verification appendix", title_style))
+    story.append(paragraph("Raw OCR extract", heading_style))
+    story.append(paragraph("Compare this text directly with the source image. Line breaks are preserved because they can affect medication interpretation.", subheading_style))
     story.append(Spacer(1, 8))
-    story.append(Preformatted(raw_text or "No OCR text captured.", mono_style))
+    story.append(paragraph(raw_text or "No OCR text captured.", ocr_style))
+    story.append(Spacer(1, 10))
+    story.append(paragraph("Report trace", heading_style))
+    story.append(build_detail_table([
+        [paragraph("Report ID", meta_style), paragraph(report_id, body_style)],
+        [paragraph("Dataset sources", meta_style), paragraph(", ".join(dataset_names) if dataset_names else "OCR only", body_style)],
+        [paragraph("Review status", meta_style), paragraph(safe_text(analysis.get("review_status"), "Needs review"), body_style)],
+    ], col_widths=[38 * mm, 130 * mm], background="#f8fafc"))
 
     doc.build(story, onFirstPage=lambda canvas, report_doc: draw_page_chrome(canvas, report_doc, app_name), onLaterPages=lambda canvas, report_doc: draw_page_chrome(canvas, report_doc, app_name))
     return buffer.getvalue()

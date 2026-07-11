@@ -85,14 +85,14 @@
                                     <p class="mt-2 text-sm leading-6 text-slate-700">{{ med.composition or 'Not available' }}</p>
                                 </div>
                                 <div>
-                                    <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Substitutes</p>
+                                    <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Dataset reference candidates</p>
                                     <div class="mt-2 flex flex-wrap gap-2">
                                         {% if med.substitutes %}
                                             {% for item in med.substitutes[:3] %}
                                             <span class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{{ item }}</span>
                                             {% endfor %}
                                         {% else %}
-                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No mapped substitutes</span>
+                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No dataset reference candidates</span>
                                         {% endif %}
                                     </div>
                                 </div>
