@@ -15,6 +15,7 @@ from .storage import append_audit_event, load_history
 from .web import analyze, download_report, history_payload, render_dashboard, render_details, render_history, review_analysis
 
 settings.validate_runtime()
+settings.uploads_dir.mkdir(parents=True, exist_ok=True)
 load_history()
 
 app = FastAPI(title=f"{settings.app_name} API")
