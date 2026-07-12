@@ -47,6 +47,8 @@ def test_authentication_redirects_and_creates_secure_session():
         response = auth_client.get("/", follow_redirects=False)
         assert response.status_code == 303
         assert response.headers["location"] == "/login"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-frame-options"] == "DENY"
 
         login_page = auth_client.get("/login")
         csrf = re.search(r'name="csrf" value="([^"]+)"', login_page.text).group(1)

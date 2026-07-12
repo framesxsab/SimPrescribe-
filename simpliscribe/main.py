@@ -27,12 +27,15 @@ _analysis_slots = asyncio.Semaphore(2)
 
 @app.middleware("http")
 async def protect_health_data_responses(request: Request, call_next):
+    response = None
     if settings.authentication_enabled and request.url.path not in {"/login", "/api/health", "/api/live"} and not request.url.path.startswith("/static/"):
         if current_user(request) is None:
             if request.url.path.startswith("/api/"):
-                return JSONResponse(status_code=401, content={"detail": "Authentication required."})
-            return RedirectResponse("/login", status_code=303)
-    response = await call_next(request)
+                response = JSONResponse(status_code=401, content={"detail": "Authentication required."})
+            else:
+                response = RedirectResponse("/login", status_code=303)
+    if response is None:
+        response = await call_next(request)
     if not request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "no-store")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
