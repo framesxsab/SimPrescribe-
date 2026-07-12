@@ -17,6 +17,13 @@ class Settings:
     uploads_dir: Path = BASE_DIR / "uploads"
     data_dir: Path = BASE_DIR / "data"
     history_file: Path = BASE_DIR / "data" / "analysis_history.json"
+    database_url: str = os.environ.get("DATABASE_URL", f"sqlite:///{(BASE_DIR / 'data' / 'simpliscribe.db').as_posix()}")
+    session_secret: str = os.environ.get("SESSION_SECRET", "development-only-change-me")
+    admin_email: str = os.environ.get("ADMIN_EMAIL", "admin@localhost")
+    admin_password: str = os.environ.get("ADMIN_PASSWORD", "")
+    auth_required: bool = os.environ.get("AUTH_REQUIRED", "").strip().lower() in {"1", "true", "yes", "on"}
+    retention_days: int = int(os.environ.get("RETENTION_DAYS", "30"))
+    session_max_age_seconds: int = int(os.environ.get("SESSION_MAX_AGE_SECONDS", "28800"))
     india_medicine_dataset: Path = BASE_DIR / "A_Z_medicines_dataset_of_India.csv"
     medicine_database_dataset: Path = BASE_DIR / "all_medicine databased.csv"
     max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "10"))
@@ -40,6 +47,28 @@ class Settings:
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def production(self) -> bool:
+        return self.app_env.strip().lower() == "production"
+
+    @property
+    def authentication_enabled(self) -> bool:
+        return self.production or self.auth_required
+
+    def validate_runtime(self) -> None:
+        errors: list[str] = []
+        if self.production:
+            if self.session_secret == "development-only-change-me" or len(self.session_secret) < 32:
+                errors.append("SESSION_SECRET must be a unique value of at least 32 characters")
+            if not self.admin_password:
+                errors.append("ADMIN_PASSWORD is required")
+            if self.database_url.startswith("sqlite"):
+                errors.append("DATABASE_URL must use a production database such as PostgreSQL")
+        if self.retention_days < 1:
+            errors.append("RETENTION_DAYS must be at least 1")
+        if errors:
+            raise RuntimeError("Unsafe runtime configuration: " + "; ".join(errors))
 
 
 settings = Settings()

@@ -39,6 +39,14 @@ PY
 
 COPY . .
 
+RUN addgroup --system app && adduser --system --ingroup app app \
+    && chown -R app:app /app
+
+USER app
+
 EXPOSE 7860
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/api/live', timeout=3)" || exit 1
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]

@@ -1,4 +1,5 @@
 from io import BytesIO
+import re
 
 import fitz
 from fastapi.testclient import TestClient
@@ -10,6 +11,7 @@ from simpliscribe.inference import build_medication_record
 from simpliscribe.inference import refine_model_medications
 from simpliscribe.ocr import OCRLine, OCRResult
 from simpliscribe.storage import append_history, load_history, save_history
+from simpliscribe.storage import get_analysis_record
 from simpliscribe.config import settings
 
 
@@ -31,6 +33,35 @@ def test_health_route_exposes_review_boundary():
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["clinical_use"] == "human_review_required"
+
+
+def test_authentication_redirects_and_creates_secure_session():
+    original_required = settings.auth_required
+    original_email = settings.admin_email
+    original_password = settings.admin_password
+    object.__setattr__(settings, "auth_required", True)
+    object.__setattr__(settings, "admin_email", "reviewer@example.test")
+    object.__setattr__(settings, "admin_password", "correct horse battery staple")
+    auth_client = TestClient(app)
+    try:
+        response = auth_client.get("/", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login"
+
+        login_page = auth_client.get("/login")
+        csrf = re.search(r'name="csrf" value="([^"]+)"', login_page.text).group(1)
+        login_response = auth_client.post(
+            "/login",
+            data={"email": "reviewer@example.test", "password": "correct horse battery staple", "csrf": csrf},
+            follow_redirects=False,
+        )
+        assert login_response.status_code == 303
+        assert login_response.headers["location"] == "/"
+        assert auth_client.get("/").status_code == 200
+    finally:
+        object.__setattr__(settings, "auth_required", original_required)
+        object.__setattr__(settings, "admin_email", original_email)
+        object.__setattr__(settings, "admin_password", original_password)
 
 
 def test_analyze_preserves_parsed_contract_and_pipeline_metadata(monkeypatch):
@@ -59,7 +90,7 @@ def test_analyze_preserves_parsed_contract_and_pipeline_metadata(monkeypatch):
     Image.new("RGB", (1, 1), "white").save(image_buffer, format="PNG")
     image = image_buffer.getvalue()
     try:
-        response = client.post("/api/analyze", files={"file": ("rx.png", image, "image/png")})
+        response = client.post("/api/analyze", data={"consent": "true"}, files={"file": ("rx.png", image, "image/png")})
         assert response.status_code == 200
         payload = response.json()
         assert payload["medications"] == [{"name": "Paracetamol", "requires_review": True}]
@@ -74,11 +105,51 @@ def test_analyze_preserves_parsed_contract_and_pipeline_metadata(monkeypatch):
 def test_analyze_rejects_spoofed_image_and_removes_upload():
     before = {path.name for path in settings.uploads_dir.iterdir()}
 
-    response = client.post("/api/analyze", files={"file": ("fake.png", b"not an image", "image/png")})
+    response = client.post("/api/analyze", data={"consent": "true"}, files={"file": ("fake.png", b"not an image", "image/png")})
 
     assert response.status_code == 400
     assert "not a valid supported image" in response.json()["detail"]
     assert {path.name for path in settings.uploads_dir.iterdir()} == before
+
+
+def test_analyze_requires_explicit_consent():
+    response = client.post("/api/analyze", files={"file": ("rx.png", b"not an image", "image/png")})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Explicit processing consent is required."
+
+
+def test_storage_isolates_analysis_owners():
+    owner_a = "test-owner-a"
+    owner_b = "test-owner-b"
+    record = {"id": "owner-isolation-record", "created_at": "2026-07-11T00:00:00+00:00", "medications": []}
+    try:
+        append_history(record, owner_id=owner_a)
+        assert get_analysis_record(record["id"], owner_a) == record
+        assert get_analysis_record(record["id"], owner_b) is None
+    finally:
+        save_history([], owner_a)
+
+
+def test_review_endpoint_updates_owned_analysis():
+    original_history = load_history()
+    record = {
+        "id": "review-test-id",
+        "created_at": "2026-07-11T00:00:00+00:00",
+        "medications": [{"name": "Paracetmol", "type": "Tablet", "dosage": "650 mg", "frequency": "once daily", "duration": "5 days"}],
+    }
+    try:
+        append_history(record)
+        response = client.patch(
+            "/api/analyses/review-test-id/review",
+            json={"status": "corrected", "medications": [{"name": "Paracetamol"}]},
+        )
+        assert response.status_code == 200
+        updated = get_analysis_record("review-test-id")
+        assert updated["review_status"] == "corrected"
+        assert updated["medications"][0]["name"] == "Paracetamol"
+        assert updated["reviewed_by"] == "local"
+    finally:
+        save_history(original_history)
 
 
 def test_analyze_removes_upload_when_ocr_is_unusable(monkeypatch):
@@ -87,7 +158,7 @@ def test_analyze_removes_upload_when_ocr_is_unusable(monkeypatch):
     image_buffer = BytesIO()
     Image.new("RGB", (2, 2), "white").save(image_buffer, format="PNG")
 
-    response = client.post("/api/analyze", files={"file": ("rx.png", image_buffer.getvalue(), "image/png")})
+    response = client.post("/api/analyze", data={"consent": "true"}, files={"file": ("rx.png", image_buffer.getvalue(), "image/png")})
 
     assert response.status_code == 422
     assert response.json()["error_code"] == "UNUSABLE_PRESCRIPTION"

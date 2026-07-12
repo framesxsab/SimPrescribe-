@@ -10,3 +10,6 @@ data/*.jpg
 data/*.jpeg
 data/*.png
 data/analysis_history.json
+data/*.db
+data/*.db-shm
+data/*.db-wal

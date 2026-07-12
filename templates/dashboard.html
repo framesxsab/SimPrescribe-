@@ -69,12 +69,16 @@
                 </button>
             </form>
             <div class="mt-4 w-full text-center">
+                 <label class="mb-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-xs leading-5 text-slate-600">
+                    <input id="processing-consent" type="checkbox" class="mt-1 rounded border-slate-300 text-primary focus:ring-primary">
+                    <span>I consent to processing this prescription for OCR and medication review. I understand that results require confirmation against the original document.</span>
+                 </label>
                  <button id="analyze-btn" class="hidden bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-8 py-3 rounded-xl font-semibold text-sm shadow-sm hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors mx-auto">Analyze Now</button>
             </div>
             <p class="mt-4 text-xs text-slate-500">Maximum upload size: {{ max_upload_mb }} MB</p>
             <div class="mt-6 flex items-center gap-2 text-slate-500 text-xs text-center mx-auto justify-center">
                 <span class="material-symbols-outlined text-sm">info</span>
-                Results are stored locally in the workspace history file until you clear them.
+                Analyses are isolated to your account and automatically expire under the configured retention policy.
             </div>
         </div>
         
@@ -324,10 +328,13 @@
         
         const formData = new FormData();
         formData.append("file", fileInput.files[0]);
+        formData.append("consent", document.getElementById('processing-consent').checked ? "true" : "false");
+        formData.append("csrf", "{{ csrf_token }}");
 
         try {
             const response = await fetch('/api/analyze', {
                 method: 'POST',
+                headers: {'X-CSRF-Token': '{{ csrf_token }}'},
                 body: formData
             });
             

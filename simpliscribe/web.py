@@ -6,14 +6,15 @@ from pathlib import Path
 from urllib.parse import quote
 from typing import Any
 
-from fastapi import File, HTTPException, Request, UploadFile
+from fastapi import File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .config import settings
 from .inference import structure_medications
 from .ocr import extract_ocr_result, validate_document
 from .reporting import build_pdf_report
-from .storage import append_history, get_analysis_record, load_history
+from .security import owner_id, public_user_context, verify_csrf
+from .storage import append_audit_event, append_history, get_analysis_record, load_history, update_analysis_record
 
 
 logger = logging.getLogger(__name__)
@@ -57,38 +58,43 @@ async def save_upload(file: UploadFile) -> Path:
 
 
 async def render_dashboard(request: Request, templates) -> HTMLResponse:
+    owner = owner_id(request)
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         {
-            "recent_analyses": load_history()[:5],
+            "recent_analyses": load_history(owner)[:5],
             "max_upload_mb": settings.max_upload_mb,
             "app_name": settings.app_name,
+            **public_user_context(request),
         },
     )
 
 
 async def render_history(request: Request, templates) -> HTMLResponse:
-    return templates.TemplateResponse(request, "history.html", {"analyses": load_history(), "app_name": settings.app_name})
+    owner = owner_id(request)
+    return templates.TemplateResponse(request, "history.html", {"analyses": load_history(owner), "app_name": settings.app_name, **public_user_context(request)})
 
 
 async def render_details(request: Request, analysis_id: str, templates) -> HTMLResponse:
-    analysis = get_analysis_record(analysis_id)
+    analysis = get_analysis_record(analysis_id, owner_id(request))
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
-    return templates.TemplateResponse(request, "details.html", {"analysis": analysis, "app_name": settings.app_name})
+    return templates.TemplateResponse(request, "details.html", {"analysis": analysis, "app_name": settings.app_name, **public_user_context(request)})
 
 
-async def history_payload() -> dict[str, Any]:
-    return {"analyses": load_history()}
+async def history_payload(request: Request) -> dict[str, Any]:
+    return {"analyses": load_history(owner_id(request))}
 
 
-async def download_report(analysis_id: str) -> Response:
-    analysis = get_analysis_record(analysis_id)
+async def download_report(request: Request, analysis_id: str) -> Response:
+    owner = owner_id(request)
+    analysis = get_analysis_record(analysis_id, owner)
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
 
     pdf_bytes = build_pdf_report(analysis, settings.app_name)
+    append_audit_event(str(uuid.uuid4()), owner, "report_downloaded", analysis_id)
     safe_name = sanitize_filename(str(analysis.get("filename") or "analysis"))
     download_name = f"{Path(safe_name).stem}_report.pdf"
     encoded_name = quote(download_name)
@@ -100,7 +106,17 @@ async def download_report(analysis_id: str) -> Response:
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
-async def analyze(file: UploadFile = File(...)) -> JSONResponse:
+async def analyze(
+    request: Request,
+    file: UploadFile = File(...),
+    consent: bool = Form(False),
+    csrf: str | None = Form(None),
+) -> JSONResponse:
+    owner = owner_id(request)
+    if settings.authentication_enabled:
+        verify_csrf(request, request.headers.get("X-CSRF-Token") or csrf)
+    if not consent:
+        raise HTTPException(status_code=400, detail="Explicit processing consent is required.")
     stored_file = await save_upload(file)
     try:
         ocr_result = extract_ocr_result(stored_file)
@@ -125,7 +141,8 @@ async def analyze(file: UploadFile = File(...)) -> JSONResponse:
             "pipeline": pipeline,
             "review_status": "needs_review",
         }
-        append_history(record)
+        append_history(record, owner_id=owner)
+        append_audit_event(str(uuid.uuid4()), owner, "analysis_created", analysis_id, provider=pipeline.get("used_provider", "unknown"))
         return JSONResponse(
             content={"analysis_id": analysis_id, **record},
             headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
@@ -157,3 +174,32 @@ async def analyze(file: UploadFile = File(...)) -> JSONResponse:
     finally:
         if stored_file.exists():
             stored_file.unlink()
+
+
+async def review_analysis(request: Request, analysis_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    owner = owner_id(request)
+    if settings.authentication_enabled:
+        verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    analysis = get_analysis_record(analysis_id, owner)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+    status = str(payload.get("status") or "").strip()
+    if status not in {"confirmed", "corrected", "rejected"}:
+        raise HTTPException(status_code=400, detail="Invalid review status.")
+    medications = payload.get("medications")
+    if medications is not None:
+        if not isinstance(medications, list) or len(medications) > 50:
+            raise HTTPException(status_code=400, detail="Invalid medications payload.")
+        allowed = {"name", "type", "dosage", "frequency", "duration"}
+        for index, correction in enumerate(medications):
+            if not isinstance(correction, dict) or index >= len(analysis.get("medications", [])):
+                raise HTTPException(status_code=400, detail="Invalid medication correction.")
+            for field in allowed:
+                if field in correction:
+                    analysis["medications"][index][field] = str(correction[field]).strip()[:500]
+    analysis["review_status"] = status
+    analysis["reviewed_at"] = utc_now_iso()
+    analysis["reviewed_by"] = owner
+    update_analysis_record(analysis_id, owner, analysis)
+    append_audit_event(str(uuid.uuid4()), owner, "analysis_reviewed", analysis_id, status=status)
+    return {"analysis_id": analysis_id, "review_status": status, "reviewed_at": analysis["reviewed_at"]}

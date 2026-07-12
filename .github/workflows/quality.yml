@@ -1,0 +1,27 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+      - name: Run synthetic golden quality gate
+        env:
+          INFERENCE_PROVIDER: fallback
+        run: >-
+          python -m simpliscribe.benchmark
+          --cases data/golden_cases.v1.json
+          --output data/benchmark_runs/ci.json
+          --min-f1 0.85
+          --max-hallucination-rate 0.10

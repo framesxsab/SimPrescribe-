@@ -1,13 +1,20 @@
 {
-  "generated_at": "2026-07-11T02:02:33.512235+00:00",
-  "case_count": 2,
-  "success_count": 2,
+  "schema_version": "1.0",
+  "dataset": {
+    "schema_version": "1.0",
+    "dataset": "simpliscribe-synthetic-golden-v1",
+    "provenance": "Repository-authored synthetic OCR text for regression testing; not clinician-adjudicated.",
+    "created_at": "2026-07-11"
+  },
+  "generated_at": "2026-07-12T04:19:11.682606+00:00",
+  "case_count": 8,
+  "success_count": 8,
   "failure_count": 0,
   "average_score": 1.0,
   "cases": [
     {
-      "id": "case-1",
-      "label": "Simple once-daily tablet",
+      "id": "clean-single-tablet",
+      "label": "Clean single tablet",
       "score": 1.0,
       "matched_fields": 5,
       "total_fields": 5,
@@ -61,9 +68,19 @@
           }
         }
       ],
+      "medication_results": [
+        {
+          "expected_medication_index": 0,
+          "actual_medication_index": 0,
+          "name_matched": true,
+          "requires_review_expected": false,
+          "requires_review_actual": false
+        }
+      ],
       "field_results": [
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "name",
           "matched": true,
           "expected": "Paracetamol",
@@ -71,6 +88,7 @@
         },
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "type",
           "matched": true,
           "expected": "Tablet",
@@ -78,6 +96,7 @@
         },
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "dosage",
           "matched": true,
           "expected": "650 mg",
@@ -85,6 +104,7 @@
         },
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "frequency",
           "matched": true,
           "expected": "once daily",
@@ -92,17 +112,25 @@
         },
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "duration",
           "matched": true,
           "expected": "5 days",
           "actual": "5 days"
         }
       ],
+      "tags": [
+        "synthetic",
+        "clean",
+        "single-medication"
+      ],
+      "expected_rejection": false,
+      "rejected": false,
       "error": ""
     },
     {
-      "id": "case-2",
-      "label": "Two-line mixed medicines",
+      "id": "mixed-two-medications",
+      "label": "Two medicines with different forms",
       "score": 1.0,
       "matched_fields": 10,
       "total_fields": 10,
@@ -181,9 +209,26 @@
           }
         }
       ],
+      "medication_results": [
+        {
+          "expected_medication_index": 0,
+          "actual_medication_index": 0,
+          "name_matched": true,
+          "requires_review_expected": true,
+          "requires_review_actual": true
+        },
+        {
+          "expected_medication_index": 1,
+          "actual_medication_index": 1,
+          "name_matched": true,
+          "requires_review_expected": true,
+          "requires_review_actual": true
+        }
+      ],
       "field_results": [
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "name",
           "matched": true,
           "expected": "Amoxycillin",
@@ -191,6 +236,7 @@
         },
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "type",
           "matched": true,
           "expected": "Capsule",
@@ -198,6 +244,7 @@
         },
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "dosage",
           "matched": true,
           "expected": "500 mg",
@@ -205,6 +252,7 @@
         },
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "frequency",
           "matched": true,
           "expected": "twice daily",
@@ -212,6 +260,7 @@
         },
         {
           "medication_index": 0,
+          "actual_medication_index": 0,
           "field": "duration",
           "matched": true,
           "expected": "5 days",
@@ -219,6 +268,7 @@
         },
         {
           "medication_index": 1,
+          "actual_medication_index": 1,
           "field": "name",
           "matched": true,
           "expected": "Cetirizine",
@@ -226,6 +276,7 @@
         },
         {
           "medication_index": 1,
+          "actual_medication_index": 1,
           "field": "type",
           "matched": true,
           "expected": "Tablet",
@@ -233,6 +284,7 @@
         },
         {
           "medication_index": 1,
+          "actual_medication_index": 1,
           "field": "dosage",
           "matched": true,
           "expected": "10 mg",
@@ -240,6 +292,7 @@
         },
         {
           "medication_index": 1,
+          "actual_medication_index": 1,
           "field": "frequency",
           "matched": true,
           "expected": "at bedtime",
@@ -247,13 +300,500 @@
         },
         {
           "medication_index": 1,
+          "actual_medication_index": 1,
           "field": "duration",
           "matched": true,
           "expected": "3 days",
           "actual": "3 days"
         }
       ],
+      "tags": [
+        "synthetic",
+        "multi-medication",
+        "mixed-form"
+      ],
+      "expected_rejection": false,
+      "rejected": false,
+      "error": ""
+    },
+    {
+      "id": "timing-pattern",
+      "label": "Numeric timing notation",
+      "score": 1.0,
+      "matched_fields": 5,
+      "total_fields": 5,
+      "expected_count": 1,
+      "actual_count": 1,
+      "source_kind": "text",
+      "source_path": "",
+      "raw_text": "Metformin 500 tab 1-0-1 for 30 days",
+      "actual": [
+        {
+          "name": "Metformin",
+          "category": "General",
+          "type": "Tablet",
+          "dosage": "500 mg",
+          "frequency": "twice daily",
+          "duration": "30 days",
+          "insight": "Take twice daily for 30 days.",
+          "requires_review": true,
+          "review_reasons": [
+            "Medicine name was not confirmed against the reference datasets."
+          ],
+          "source": "OCR only",
+          "source_datasets": [],
+          "composition": "",
+          "manufacturer": "",
+          "pack_size": "",
+          "therapeutic_class": "",
+          "chemical_class": "",
+          "action_class": "",
+          "substitutes": [],
+          "uses": [],
+          "side_effects": [],
+          "dataset_match": null
+        }
+      ],
+      "medication_results": [
+        {
+          "expected_medication_index": 0,
+          "actual_medication_index": 0,
+          "name_matched": true,
+          "requires_review_expected": false,
+          "requires_review_actual": true
+        }
+      ],
+      "field_results": [
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "name",
+          "matched": true,
+          "expected": "Metformin",
+          "actual": "Metformin"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "type",
+          "matched": true,
+          "expected": "Tablet",
+          "actual": "Tablet"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "dosage",
+          "matched": true,
+          "expected": "500 mg",
+          "actual": "500 mg"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "frequency",
+          "matched": true,
+          "expected": "twice daily",
+          "actual": "twice daily"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "duration",
+          "matched": true,
+          "expected": "30 days",
+          "actual": "30 days"
+        }
+      ],
+      "tags": [
+        "synthetic",
+        "frequency",
+        "timing-notation"
+      ],
+      "expected_rejection": false,
+      "rejected": false,
+      "error": ""
+    },
+    {
+      "id": "as-needed-medication",
+      "label": "As-needed shorthand",
+      "score": 1.0,
+      "matched_fields": 5,
+      "total_fields": 5,
+      "expected_count": 1,
+      "actual_count": 1,
+      "source_kind": "text",
+      "source_path": "",
+      "raw_text": "Ibuprofen 400 tab sos 3 days",
+      "actual": [
+        {
+          "name": "Ibuprofen",
+          "category": "General",
+          "type": "Tablet",
+          "dosage": "400 mg",
+          "frequency": "as needed",
+          "duration": "3 days",
+          "insight": "Take as needed for 3 days.",
+          "requires_review": true,
+          "review_reasons": [
+            "Medicine name was not confirmed against the reference datasets."
+          ],
+          "source": "OCR only",
+          "source_datasets": [],
+          "composition": "",
+          "manufacturer": "",
+          "pack_size": "",
+          "therapeutic_class": "",
+          "chemical_class": "",
+          "action_class": "",
+          "substitutes": [],
+          "uses": [],
+          "side_effects": [],
+          "dataset_match": null
+        }
+      ],
+      "medication_results": [
+        {
+          "expected_medication_index": 0,
+          "actual_medication_index": 0,
+          "name_matched": true,
+          "requires_review_expected": false,
+          "requires_review_actual": true
+        }
+      ],
+      "field_results": [
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "name",
+          "matched": true,
+          "expected": "Ibuprofen",
+          "actual": "Ibuprofen"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "type",
+          "matched": true,
+          "expected": "Tablet",
+          "actual": "Tablet"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "dosage",
+          "matched": true,
+          "expected": "400 mg",
+          "actual": "400 mg"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "frequency",
+          "matched": true,
+          "expected": "as needed",
+          "actual": "as needed"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "duration",
+          "matched": true,
+          "expected": "3 days",
+          "actual": "3 days"
+        }
+      ],
+      "tags": [
+        "synthetic",
+        "frequency",
+        "safety-critical"
+      ],
+      "expected_rejection": false,
+      "rejected": false,
+      "error": ""
+    },
+    {
+      "id": "missing-duration-review",
+      "label": "Missing duration must be reviewed",
+      "score": 1.0,
+      "matched_fields": 5,
+      "total_fields": 5,
+      "expected_count": 1,
+      "actual_count": 1,
+      "source_kind": "text",
+      "source_path": "",
+      "raw_text": "Pantoprazole 40 tab od",
+      "actual": [
+        {
+          "name": "Pantoprazole",
+          "category": "General",
+          "type": "Tablet",
+          "dosage": "40 mg",
+          "frequency": "once daily",
+          "duration": "N/A",
+          "insight": "Take once daily.",
+          "requires_review": true,
+          "review_reasons": [
+            "Medicine name was not confirmed against the reference datasets.",
+            "Duration was not captured."
+          ],
+          "source": "OCR only",
+          "source_datasets": [],
+          "composition": "",
+          "manufacturer": "",
+          "pack_size": "",
+          "therapeutic_class": "",
+          "chemical_class": "",
+          "action_class": "",
+          "substitutes": [],
+          "uses": [],
+          "side_effects": [],
+          "dataset_match": null
+        }
+      ],
+      "medication_results": [
+        {
+          "expected_medication_index": 0,
+          "actual_medication_index": 0,
+          "name_matched": true,
+          "requires_review_expected": true,
+          "requires_review_actual": true
+        }
+      ],
+      "field_results": [
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "name",
+          "matched": true,
+          "expected": "Pantoprazole",
+          "actual": "Pantoprazole"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "type",
+          "matched": true,
+          "expected": "Tablet",
+          "actual": "Tablet"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "dosage",
+          "matched": true,
+          "expected": "40 mg",
+          "actual": "40 mg"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "frequency",
+          "matched": true,
+          "expected": "once daily",
+          "actual": "once daily"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "duration",
+          "matched": true,
+          "expected": "N/A",
+          "actual": "N/A"
+        }
+      ],
+      "tags": [
+        "synthetic",
+        "missing-field",
+        "review-flag"
+      ],
+      "expected_rejection": false,
+      "rejected": false,
+      "error": ""
+    },
+    {
+      "id": "unknown-name-review",
+      "label": "Unconfirmed medicine name must be reviewed",
+      "score": 1.0,
+      "matched_fields": 5,
+      "total_fields": 5,
+      "expected_count": 1,
+      "actual_count": 1,
+      "source_kind": "text",
+      "source_path": "",
+      "raw_text": "Imaginarin 25 tab bd 7 days",
+      "actual": [
+        {
+          "name": "Imaginarin",
+          "category": "General",
+          "type": "Tablet",
+          "dosage": "25 mg",
+          "frequency": "twice daily",
+          "duration": "7 days",
+          "insight": "Take twice daily for 7 days.",
+          "requires_review": true,
+          "review_reasons": [
+            "Medicine name was not confirmed against the reference datasets."
+          ],
+          "source": "OCR only",
+          "source_datasets": [],
+          "composition": "",
+          "manufacturer": "",
+          "pack_size": "",
+          "therapeutic_class": "",
+          "chemical_class": "",
+          "action_class": "",
+          "substitutes": [],
+          "uses": [],
+          "side_effects": [],
+          "dataset_match": null
+        }
+      ],
+      "medication_results": [
+        {
+          "expected_medication_index": 0,
+          "actual_medication_index": 0,
+          "name_matched": true,
+          "requires_review_expected": true,
+          "requires_review_actual": true
+        }
+      ],
+      "field_results": [
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "name",
+          "matched": true,
+          "expected": "Imaginarin",
+          "actual": "Imaginarin"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "type",
+          "matched": true,
+          "expected": "Tablet",
+          "actual": "Tablet"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "dosage",
+          "matched": true,
+          "expected": "25 mg",
+          "actual": "25 mg"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "frequency",
+          "matched": true,
+          "expected": "twice daily",
+          "actual": "twice daily"
+        },
+        {
+          "medication_index": 0,
+          "actual_medication_index": 0,
+          "field": "duration",
+          "matched": true,
+          "expected": "7 days",
+          "actual": "7 days"
+        }
+      ],
+      "tags": [
+        "synthetic",
+        "unconfirmed-name",
+        "review-flag"
+      ],
+      "expected_rejection": false,
+      "rejected": false,
+      "error": ""
+    },
+    {
+      "id": "non-prescription-text",
+      "label": "Administrative text should not become medication",
+      "score": 1.0,
+      "matched_fields": 0,
+      "total_fields": 0,
+      "expected_count": 0,
+      "actual_count": 0,
+      "source_kind": "text",
+      "source_path": "",
+      "raw_text": "Patient Name Date Clinic Address Phone",
+      "actual": [],
+      "medication_results": [],
+      "field_results": [],
+      "tags": [
+        "synthetic",
+        "negative",
+        "false-positive"
+      ],
+      "expected_rejection": false,
+      "rejected": false,
+      "error": ""
+    },
+    {
+      "id": "unreadable-input",
+      "label": "Unreadable OCR output should be rejected",
+      "score": 1.0,
+      "matched_fields": 0,
+      "total_fields": 0,
+      "expected_count": 0,
+      "actual_count": 0,
+      "source_kind": "text",
+      "source_path": "",
+      "raw_text": "### ??? ...",
+      "actual": [],
+      "medication_results": [],
+      "field_results": [],
+      "tags": [
+        "synthetic",
+        "unreadable",
+        "rejection"
+      ],
+      "expected_rejection": true,
+      "rejected": true,
       "error": ""
     }
-  ]
+  ],
+  "metrics": {
+    "medication_detection": {
+      "true_positives": 7,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "hallucination_rate": 0.0
+    },
+    "field_accuracy": {
+      "name": {
+        "matched": 7,
+        "total": 7,
+        "accuracy": 1.0
+      },
+      "type": {
+        "matched": 7,
+        "total": 7,
+        "accuracy": 1.0
+      },
+      "dosage": {
+        "matched": 7,
+        "total": 7,
+        "accuracy": 1.0
+      },
+      "frequency": {
+        "matched": 7,
+        "total": 7,
+        "accuracy": 1.0
+      },
+      "duration": {
+        "matched": 7,
+        "total": 7,
+        "accuracy": 1.0
+      }
+    },
+    "review_flag_recall": 1.0,
+    "unreadable_rejection_rate": 1.0
+  }
 }

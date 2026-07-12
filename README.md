@@ -150,6 +150,24 @@ Recommended workflow:
 4. Run again with `INFERENCE_PROVIDER=endpoint` and your local model server.
 5. Compare the saved benchmark reports before changing prompts or models.
 
+### Versioned golden regression set
+
+The committed `data/golden_cases.v1.json` file uses schema version `1.0` and covers clean, multi-medication, timing, missing-field, false-positive, and unreadable synthetic OCR scenarios. It is deliberately labelled synthetic and must not be presented as clinical validation.
+
+Run the same quality gate used by CI:
+
+```bash
+INFERENCE_PROVIDER=fallback python -m simpliscribe.benchmark \
+  --cases data/golden_cases.v1.json \
+  --output data/benchmark_runs/latest.json \
+  --min-f1 0.85 \
+  --max-hallucination-rate 0.10
+```
+
+On PowerShell, set `$env:INFERENCE_PROVIDER="fallback"` before running the Python command. Reports include medicine-name precision/recall/F1, hallucination rate, accuracy by extracted field, expected-review flag recall, and unreadable-input rejection rate. A failed threshold exits non-zero for CI.
+
+Golden files accept a top-level object containing `schema_version`, provenance metadata, and `cases`. Each case requires a unique `id`, an `expected_medications` array, and either `raw_text` or a relative `file_path`. Optional `tags`, per-medication `requires_review`, and case-level `expected_rejection` fields enable subgroup and safety evaluation. Reviewed image fixtures should be de-identified and committed only when consent and dataset terms allow it.
+
 For a clinically meaningful evaluation, replace the samples with de-identified, consented prescriptions adjudicated by qualified reviewers. Report medication-name precision/recall, exact strength/frequency/duration accuracy, unreadable-scan rejection, subgroup performance, and false confident matches. Do not promote a model based on one aggregate score.
 
 ## Practical roadmap
@@ -163,6 +181,26 @@ For a clinically meaningful evaluation, replace the samples with de-identified, 
 Code is MIT licensed. Dataset files may have separate upstream terms; verify and document those terms before redistribution.
 
 ## Docker deployment
+
+### Production safety configuration
+
+Production mode fails closed unless authentication, a strong session secret, and a non-SQLite database are configured. Use a managed PostgreSQL service with encryption at rest, backups, private networking, and TLS enforcement. Store all values below in the deployment platform's secret manager rather than committing an `.env` file.
+
+```bash
+APP_ENV=production
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/simpliscribe?sslmode=require
+SESSION_SECRET=<at-least-32-random-characters>
+ADMIN_EMAIL=reviewer@example.com
+ADMIN_PASSWORD=<strong-secret-manager-value>
+RETENTION_DAYS=30
+SESSION_MAX_AGE_SECONDS=28800
+```
+
+Production behavior includes authenticated, owner-scoped analyses; signed HTTP-only session cookies; CSRF validation; explicit upload consent; automatic retention expiry; redacted audit events; protected history, details, reports, and review APIs; analysis rate/concurrency limits; CSP and HSTS headers; separate liveness/readiness endpoints; and a non-root container health check.
+
+The configured administrator is a deployment bootstrap account. For an organization or multiple reviewers, replace it with an external identity provider before onboarding users. Database creation currently uses SQLAlchemy metadata initialization; adopt managed migrations before independently evolving multiple deployed versions.
+
+The review screen supports correction, confirmation, and unreadable rejection. Original uploads are removed after processing, so reviewers must compare against their own source document during the active workflow. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing.
 
 ```bash
 docker build -t simpliscribe .

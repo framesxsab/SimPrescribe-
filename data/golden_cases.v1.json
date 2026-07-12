@@ -1,0 +1,78 @@
+{
+  "schema_version": "1.0",
+  "dataset": "simpliscribe-synthetic-golden-v1",
+  "provenance": "Repository-authored synthetic OCR text for regression testing; not clinician-adjudicated.",
+  "created_at": "2026-07-11",
+  "cases": [
+    {
+      "id": "clean-single-tablet",
+      "label": "Clean single tablet",
+      "tags": ["synthetic", "clean", "single-medication"],
+      "raw_text": "Paracetamol 650 tab od 5 days",
+      "expected_medications": [
+        {"name": "Paracetamol", "type": "Tablet", "dosage": "650 mg", "frequency": "once daily", "duration": "5 days"}
+      ]
+    },
+    {
+      "id": "mixed-two-medications",
+      "label": "Two medicines with different forms",
+      "tags": ["synthetic", "multi-medication", "mixed-form"],
+      "raw_text": "Amoxycillin 500 cap bd 5 days\nCetirizine 10 tab hs 3 days",
+      "expected_medications": [
+        {"name": "Amoxycillin", "type": "Capsule", "dosage": "500 mg", "frequency": "twice daily", "duration": "5 days", "requires_review": true},
+        {"name": "Cetirizine", "type": "Tablet", "dosage": "10 mg", "frequency": "at bedtime", "duration": "3 days", "requires_review": true}
+      ]
+    },
+    {
+      "id": "timing-pattern",
+      "label": "Numeric timing notation",
+      "tags": ["synthetic", "frequency", "timing-notation"],
+      "raw_text": "Metformin 500 tab 1-0-1 for 30 days",
+      "expected_medications": [
+        {"name": "Metformin", "type": "Tablet", "dosage": "500 mg", "frequency": "twice daily", "duration": "30 days"}
+      ]
+    },
+    {
+      "id": "as-needed-medication",
+      "label": "As-needed shorthand",
+      "tags": ["synthetic", "frequency", "safety-critical"],
+      "raw_text": "Ibuprofen 400 tab sos 3 days",
+      "expected_medications": [
+        {"name": "Ibuprofen", "type": "Tablet", "dosage": "400 mg", "frequency": "as needed", "duration": "3 days"}
+      ]
+    },
+    {
+      "id": "missing-duration-review",
+      "label": "Missing duration must be reviewed",
+      "tags": ["synthetic", "missing-field", "review-flag"],
+      "raw_text": "Pantoprazole 40 tab od",
+      "expected_medications": [
+        {"name": "Pantoprazole", "type": "Tablet", "dosage": "40 mg", "frequency": "once daily", "duration": "N/A", "requires_review": true}
+      ]
+    },
+    {
+      "id": "unknown-name-review",
+      "label": "Unconfirmed medicine name must be reviewed",
+      "tags": ["synthetic", "unconfirmed-name", "review-flag"],
+      "raw_text": "Imaginarin 25 tab bd 7 days",
+      "expected_medications": [
+        {"name": "Imaginarin", "type": "Tablet", "dosage": "25 mg", "frequency": "twice daily", "duration": "7 days", "requires_review": true}
+      ]
+    },
+    {
+      "id": "non-prescription-text",
+      "label": "Administrative text should not become medication",
+      "tags": ["synthetic", "negative", "false-positive"],
+      "raw_text": "Patient Name Date Clinic Address Phone",
+      "expected_medications": []
+    },
+    {
+      "id": "unreadable-input",
+      "label": "Unreadable OCR output should be rejected",
+      "tags": ["synthetic", "unreadable", "rejection"],
+      "raw_text": "### ??? ...",
+      "expected_rejection": true,
+      "expected_medications": []
+    }
+  ]
+}

@@ -1,9 +1,12 @@
 from simpliscribe.benchmark import load_cases
+from simpliscribe.benchmark import load_case_bundle
+from simpliscribe.benchmark import evaluate_quality_gates
 from simpliscribe.benchmark import run_case
 from simpliscribe.benchmark import run_benchmark
 from simpliscribe.benchmark import score_case
 
 import pandas as pd
+import pytest
 
 
 def test_score_case_counts_matching_fields():
@@ -293,3 +296,66 @@ def test_score_case_matches_medications_independent_of_order():
     assert result.total_fields == 6
     assert result.score == 1.0
     assert result.field_results[0]["actual_medication_index"] == 1
+
+
+def test_load_versioned_golden_bundle(tmp_path):
+    path = tmp_path / "golden.json"
+    path.write_text(
+        '{"schema_version":"1.0","dataset":"test-set","cases":['
+        '{"id":"case-1","raw_text":"Example","expected_medications":[]}]}',
+        encoding="utf-8",
+    )
+
+    metadata, cases = load_case_bundle(path)
+
+    assert metadata["schema_version"] == "1.0"
+    assert metadata["dataset"] == "test-set"
+    assert cases[0]["id"] == "case-1"
+
+
+def test_load_versioned_golden_bundle_rejects_duplicate_ids(tmp_path):
+    path = tmp_path / "golden.json"
+    path.write_text(
+        '{"schema_version":"1.0","cases":['
+        '{"id":"duplicate","expected_medications":[]},'
+        '{"id":"duplicate","expected_medications":[]}]}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Duplicate benchmark case id"):
+        load_case_bundle(path)
+
+
+def test_run_benchmark_reports_detection_field_and_safety_metrics(monkeypatch):
+    cases = [
+        {
+            "id": "positive",
+            "raw_text": "positive",
+            "expected_medications": [{"name": "A", "dosage": "10 mg", "requires_review": True}],
+        },
+        {"id": "negative", "raw_text": "negative", "expected_medications": []},
+        {"id": "unreadable", "raw_text": "unreadable", "expected_rejection": True, "expected_medications": []},
+    ]
+    outputs = {
+        "positive": {"medications": [{"name": "A", "dosage": "10 mg", "requires_review": True}]},
+        "negative": {"medications": [{"name": "Hallucination"}]},
+        "unreadable": {"medications": []},
+    }
+    monkeypatch.setattr("simpliscribe.benchmark.structure_medications", lambda text: outputs[text])
+
+    result = run_benchmark(cases)
+    detection = result["metrics"]["medication_detection"]
+
+    assert detection == {
+        "true_positives": 1,
+        "false_positives": 1,
+        "false_negatives": 0,
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1": 0.6667,
+        "hallucination_rate": 0.5,
+    }
+    assert result["metrics"]["field_accuracy"]["dosage"]["accuracy"] == 1.0
+    assert result["metrics"]["review_flag_recall"] == 1.0
+    assert result["metrics"]["unreadable_rejection_rate"] == 1.0
+    assert evaluate_quality_gates(result, 0.7, 0.4)
