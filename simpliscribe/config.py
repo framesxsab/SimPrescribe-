@@ -24,6 +24,7 @@ class Settings:
     auth_required: bool = os.environ.get("AUTH_REQUIRED", "").strip().lower() in {"1", "true", "yes", "on"}
     retention_days: int = int(os.environ.get("RETENTION_DAYS", "30"))
     session_max_age_seconds: int = int(os.environ.get("SESSION_MAX_AGE_SECONDS", "28800"))
+    session_https_only: bool = os.environ.get("SESSION_HTTPS_ONLY", "").strip().lower() in {"1", "true", "yes", "on"}
     india_medicine_dataset: Path = BASE_DIR / "A_Z_medicines_dataset_of_India.csv"
     medicine_database_dataset: Path = BASE_DIR / "all_medicine databased.csv"
     max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "10"))
@@ -55,6 +56,10 @@ class Settings:
     @property
     def authentication_enabled(self) -> bool:
         return self.production or self.auth_required
+
+    @property
+    def secure_transport(self) -> bool:
+        return self.production or self.session_https_only
 
     def validate_runtime(self) -> None:
         errors: list[str] = []

@@ -40,7 +40,7 @@ async def protect_health_data_responses(request: Request, call_next):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         response.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'")
-        if settings.production:
+        if settings.secure_transport:
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 
@@ -52,7 +52,7 @@ app.add_middleware(
     secret_key=settings.session_secret,
     max_age=settings.session_max_age_seconds,
     same_site="lax",
-    https_only=settings.production,
+    https_only=settings.secure_transport,
 )
 
 

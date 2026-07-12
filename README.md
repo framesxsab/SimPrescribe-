@@ -194,6 +194,7 @@ ADMIN_EMAIL=reviewer@example.com
 ADMIN_PASSWORD=<strong-secret-manager-value>
 RETENTION_DAYS=30
 SESSION_MAX_AGE_SECONDS=28800
+SESSION_HTTPS_ONLY=true
 ```
 
 Production behavior includes authenticated, owner-scoped analyses; signed HTTP-only session cookies; CSRF validation; explicit upload consent; automatic retention expiry; redacted audit events; protected history, details, reports, and review APIs; analysis rate/concurrency limits; CSP and HSTS headers; separate liveness/readiness endpoints; and a non-root container health check.
