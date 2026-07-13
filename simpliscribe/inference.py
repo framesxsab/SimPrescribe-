@@ -917,7 +917,10 @@ def refine_model_medications(raw_text: str, medications: list[dict[str, Any]]) -
 
 
 def call_huggingface(raw_text: str) -> dict[str, Any]:
-    client = InferenceClient(token=settings.hf_token or None)
+    client = InferenceClient(
+        token=settings.hf_token or None,
+        timeout=settings.request_timeout_seconds,
+    )
     response = client.chat_completion(
         messages=[
             {"role": "system", "content": "You are a medical prescription parser. Return only valid JSON with no markdown or explanation."},

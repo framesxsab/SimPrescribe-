@@ -36,7 +36,7 @@ class Settings:
     inference_provider: str = os.environ.get("INFERENCE_PROVIDER", "huggingface")
     model_api_url: str = os.environ.get("MODEL_API_URL", "")
     model_api_key: str = os.environ.get("MODEL_API_KEY", "")
-    request_timeout_seconds: float = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "300"))
+    request_timeout_seconds: float = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "60"))
     ocr_language: str = os.environ.get("OCR_LANGUAGE", "en")
     ocr_use_gpu: bool = os.environ.get("OCR_USE_GPU", "false").strip().lower() in {"1", "true", "yes", "on"}
     local_model_id: str = os.environ.get("LOCAL_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct")
@@ -68,10 +68,14 @@ class Settings:
                 errors.append("SESSION_SECRET must be a unique value of at least 32 characters")
             if not self.admin_password:
                 errors.append("ADMIN_PASSWORD is required")
+            if not self.admin_email.strip():
+                errors.append("ADMIN_EMAIL is required")
             if self.database_url.startswith("sqlite"):
                 errors.append("DATABASE_URL must use a production database such as PostgreSQL")
         if self.retention_days < 1:
             errors.append("RETENTION_DAYS must be at least 1")
+        if self.session_max_age_seconds < 1:
+            errors.append("SESSION_MAX_AGE_SECONDS must be at least 1")
         if errors:
             raise RuntimeError("Unsafe runtime configuration: " + "; ".join(errors))
 

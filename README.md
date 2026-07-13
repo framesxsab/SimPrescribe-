@@ -11,11 +11,11 @@ SimpliScribe is a FastAPI application that simplifies prescription reading by ex
 
 ## Safety and intended use
 
-SimpliScribe is an open-source **review aid**, not a prescribing, diagnosis, dispensing, or autonomous clinical decision system. Every medicine name, strength, route, frequency, duration, interaction, and dataset reference candidate must be checked against the original prescription by a qualified clinician or pharmacist. The current benchmark contains only two synthetic text cases and is a regression check, not evidence of clinical accuracy.
+SimpliScribe is an open-source **review aid**, not a prescribing, diagnosis, dispensing, or autonomous clinical decision system. Every medicine name, strength, route, frequency, duration, interaction, and dataset reference candidate must be checked against the original prescription by a qualified clinician or pharmacist. The committed golden gate has eight synthetic cases and is a regression check, not evidence of clinical accuracy.
 
 The application preserves OCR line boundaries, exposes OCR confidence and provider provenance, marks uncertain fields for review, validates actual file content, deletes uploads after processing, and labels dataset alternatives as reference candidates rather than recommendations.
 
-Do not expose the current local JSON history store to public or multi-user healthcare traffic. A real deployment still needs authenticated role-based access, consent, encrypted database storage, audit logs, retention controls, a threat model, licensed/versioned medicine sources, and prospective clinical validation.
+Analyses are stored through SQLAlchemy. Local development defaults to SQLite and can be unauthenticated, so it is strictly a one-user, local-only workflow. Do not expose it to remote or multi-user healthcare traffic. Identifiable data needs authenticated role-based access, encrypted managed storage, audit/retention controls, a threat model, licensed/versioned medicine sources, and prospective clinical validation.
 
 ## Open-source local stack
 
@@ -53,7 +53,7 @@ LOCAL_MODEL_MAX_NEW_TOKENS=256
 The default local model is intentionally small enough to be more realistic on consumer hardware. If you have a stronger GPU, you can raise `LOCAL_MODEL_ID` to a larger open model.
 
 For a 6 GB GPU, `Qwen/Qwen2.5-1.5B-Instruct` is the recommended default starting point before trying larger models.
-The first request can take a few minutes because model weights may need to download and load into memory, so the default endpoint timeout is intentionally longer for local use.
+The first local request can take a few minutes because model weights may need to download and load into memory. If that tradeoff is acceptable on a trusted local machine, set `REQUEST_TIMEOUT_SECONDS=300` temporarily; remote deployments should keep a short bounded timeout.
 
 ## Runtime options
 
@@ -175,8 +175,8 @@ For a clinically meaningful evaluation, replace the samples with de-identified, 
 1. Build a versioned golden set with reviewer agreement and look-alike/sound-alike cases.
 2. Compare every OCR or model proposal on that same set and adopt only measured improvements.
 3. Replace unverified CSV provenance with licensed, versioned sources and stable medicine identifiers.
-4. Move history to authenticated, encrypted storage with tenant isolation and review audit events.
-5. Complete security, accessibility, workflow, and prospective clinical validation before production use.
+4. Replace the bootstrap-admin login with external identity, role/tenant claims, and managed migrations before onboarding multiple reviewers.
+5. Complete operational security, accessibility, workflow, and prospective clinical validation before production use.
 
 Code is MIT licensed. Dataset files may have separate upstream terms; verify and document those terms before redistribution.
 
@@ -195,31 +195,33 @@ ADMIN_PASSWORD=<strong-secret-manager-value>
 RETENTION_DAYS=30
 SESSION_MAX_AGE_SECONDS=28800
 SESSION_HTTPS_ONLY=true
+INFERENCE_PROVIDER=fallback
+REQUEST_TIMEOUT_SECONDS=60
 ```
 
-Production behavior includes authenticated, owner-scoped analyses; signed HTTP-only session cookies; CSRF validation; explicit upload consent; automatic retention expiry; redacted audit events; protected history, details, reports, and review APIs; analysis rate/concurrency limits; CSP and HSTS headers; separate liveness/readiness endpoints; and a non-root container health check.
+Production behavior includes a single bootstrap-admin session, signed HTTP-only cookies, CSRF validation, explicit upload consent, automatic analysis expiry, redacted audit events, protected history/details/reports/review APIs, analysis concurrency limits, CSP/HSTS headers, and a non-root container liveness check. It is not yet a multi-user identity or RBAC system.
 
 The configured administrator is a deployment bootstrap account. For an organization or multiple reviewers, replace it with an external identity provider before onboarding users. Database creation currently uses SQLAlchemy metadata initialization; adopt managed migrations before independently evolving multiple deployed versions.
 
-The review screen supports correction, confirmation, and unreadable rejection. Original uploads are removed after processing, so reviewers must compare against their own source document during the active workflow. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing.
+The review screen supports correction, confirmation, unreadable rejection, and sign-out for shared workstations. Original uploads are removed after processing, so reviewers must compare against their own source document during the active workflow. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing. Configure request-size limits at the ingress/proxy as well as `MAX_UPLOAD_MB`; multipart bodies reach the server before application validation.
 
 ```bash
 docker build -t simpliscribe .
-docker run -p 7860:7860 --env-file .env simpliscribe
+docker run --rm -p 127.0.0.1:7860:7860 --env-file production.env simpliscribe
 ```
+
+The image defaults to `APP_ENV=production` and fails closed without the complete production configuration above. Keep `production.env` outside the repository and secret manager values out of `.env.example`. Production session cookies require HTTPS: keep the container bound to loopback and place a TLS-terminating reverse proxy in front of `http://127.0.0.1:7860`; do not expose or browse the raw HTTP port directly. Use the local `uvicorn` workflow, not a remotely reachable Docker container, for unauthenticated development.
 
 ## Hugging Face Spaces
 
-This project is ready for a Docker Space.
+Do not deploy this live upload workflow to a public Hugging Face Space. A public Space cannot provide the required access controls, operational guarantees, or data-governance review. A public showcase must be static/synthetic with uploads disabled; use a private, authenticated deployment with managed PostgreSQL for any real workflow.
 
-Recommended Space path: `fxsab/simpliscribe`
+For a controlled private demo:
 
-1. In your Hugging Face account, create a new Space under `fxsab`.
+1. Create a private Docker Space.
 2. Choose `Docker` as the SDK.
-3. Name the Space `simpliscribe`.
-4. Push this repository to `https://huggingface.co/spaces/fxsab/simpliscribe`.
-5. Add the environment variables from `.env.example` in the Space settings.
-6. Keep `INFERENCE_PROVIDER=fallback` if you want zero model subscription cost.
+3. Configure every value from the production safety block as a Space secret, including managed PostgreSQL, session secret, and bootstrap credential.
+4. Keep `INFERENCE_PROVIDER=fallback` for a local-only inference path, or use a processor approved for the data you submit.
 
 Example git remote setup:
 
@@ -228,28 +230,11 @@ git remote add space https://huggingface.co/spaces/fxsab/simpliscribe
 git push space master
 ```
 
-Suggested Space variables:
-
-```env
-APP_NAME=SimpliScribe
-APP_ENV=production
-INFERENCE_PROVIDER=fallback
-HUGGINGFACEHUB_API_TOKEN=
-HF_CHAT_MODEL=Qwen/Qwen2.5-7B-Instruct
-MODEL_API_URL=
-MODEL_API_KEY=
-MAX_UPLOAD_MB=10
-MAX_PDF_PAGES=10
-MAX_IMAGE_PIXELS=40000000
-MIN_OCR_CONFIDENCE=0.80
-REQUEST_TIMEOUT_SECONDS=60
-```
-
 Expected behavior on Spaces:
 
-- The app is publicly viewable through the Space URL.
-- OCR still runs inside the Space container.
+- Keep the Space private and use synthetic/de-identified input only.
+- OCR runs inside the Space container.
 - No paid model API is required when `INFERENCE_PROVIDER=fallback`.
-- Performance depends on the free CPU resources available to the Space.
+- CPU performance and persistent-storage guarantees depend on the selected Space hardware.
 
-For an external hosted model, set `INFERENCE_PROVIDER=endpoint` and point `MODEL_API_URL` at your inference endpoint.
+For an external hosted model, set `INFERENCE_PROVIDER=endpoint` and point `MODEL_API_URL` at an endpoint approved to receive prescription OCR text.

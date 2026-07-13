@@ -1,3 +1,4 @@
+from math import ceil
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -11,6 +12,8 @@ from .config import settings
 
 _ocr_reader: Any | None = None
 _ocr_reader_lock = Lock()
+_ocr_inference_lock = Lock()
+PDF_RENDER_SCALE = 2
 
 
 @dataclass(frozen=True)
@@ -132,24 +135,39 @@ def get_ocr_reader() -> Any:
         return _ocr_reader
 
 
+def _validate_pdf_document(document: fitz.Document) -> None:
+    if document.page_count == 0:
+        raise ValueError("The uploaded PDF does not contain any pages.")
+    if document.page_count > settings.max_pdf_pages:
+        raise ValueError(f"PDF has more than the {settings.max_pdf_pages}-page limit.")
+    if document.needs_pass:
+        raise ValueError("Password-protected PDFs are not supported.")
+    total_rendered_pixels = 0
+    for page_index in range(document.page_count):
+        rect = document.load_page(page_index).rect
+        rendered_pixels = ceil(rect.width * PDF_RENDER_SCALE) * ceil(rect.height * PDF_RENDER_SCALE)
+        total_rendered_pixels += rendered_pixels
+        if rendered_pixels > settings.max_image_pixels or total_rendered_pixels > settings.max_image_pixels:
+            raise ValueError("PDF page dimensions are too large to process safely.")
+
+
 def extract_pdf_pages(file_path: Path) -> list[Path]:
     image_paths: list[Path] = []
     document = fitz.open(file_path)
     try:
-        if document.page_count == 0:
-            raise ValueError("The uploaded PDF does not contain any pages.")
-        if document.page_count > settings.max_pdf_pages:
-            raise ValueError(f"PDF has more than the {settings.max_pdf_pages}-page limit.")
-        if document.needs_pass:
-            raise ValueError("Password-protected PDFs are not supported.")
+        _validate_pdf_document(document)
 
         for page_index in range(document.page_count):
             page = document.load_page(page_index)
-            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE), alpha=False)
             image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
             output_path = file_path.with_name(f"{file_path.stem}_page_{page_index + 1}.png")
-            image.save(output_path)
             image_paths.append(output_path)
+            image.save(output_path)
+    except Exception:
+        for image_path in image_paths:
+            image_path.unlink(missing_ok=True)
+        raise
     finally:
         document.close()
 
@@ -160,12 +178,7 @@ def validate_document(file_path: Path) -> None:
     if file_path.suffix.lower() == ".pdf":
         try:
             with fitz.open(file_path) as document:
-                if document.page_count == 0:
-                    raise ValueError("The uploaded PDF does not contain any pages.")
-                if document.page_count > settings.max_pdf_pages:
-                    raise ValueError(f"PDF has more than the {settings.max_pdf_pages}-page limit.")
-                if document.needs_pass:
-                    raise ValueError("Password-protected PDFs are not supported.")
+                _validate_pdf_document(document)
         except (fitz.FileDataError, fitz.EmptyFileError) as exc:
             raise ValueError("The uploaded file is not a valid PDF.") from exc
         return
@@ -192,10 +205,11 @@ def extract_ocr_result(file_path: Path) -> OCRResult:
 
         lines: list[OCRLine] = []
         for path in input_paths:
-            try:
-                results = reader.ocr(str(path), cls=True)
-            except TypeError:
-                results = reader.ocr(str(path))
+            with _ocr_inference_lock:
+                try:
+                    results = reader.ocr(str(path), cls=True)
+                except TypeError:
+                    results = reader.ocr(str(path))
             lines.extend(_collect_paddle_lines(results))
 
         text = "\n".join(line.text for line in lines)

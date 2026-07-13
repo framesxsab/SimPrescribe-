@@ -18,6 +18,12 @@
                 <a href="/" class="text-slate-500 hover:text-slate-900">Dashboard</a>
                 <a href="/history" class="text-primary-700 text-slate-900">History</a>
             </nav>
+            {% if user %}
+            <form method="post" action="/logout">
+                <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                <button type="submit" class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:border-slate-400">Sign out</button>
+            </form>
+            {% endif %}
         </div>
     </header>
     <main class="max-w-6xl mx-auto px-6 py-10">

@@ -38,6 +38,12 @@
                     <span class="material-symbols-outlined text-base">print</span>
                     Print Report
                 </button>
+                {% if user %}
+                <form method="post" action="/logout">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <button type="submit" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition-colors">Sign out</button>
+                </form>
+                {% endif %}
             </nav>
         </div>
     </header>

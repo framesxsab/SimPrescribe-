@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import uuid
@@ -119,8 +120,8 @@ async def analyze(
         raise HTTPException(status_code=400, detail="Explicit processing consent is required.")
     stored_file = await save_upload(file)
     try:
-        ocr_result = extract_ocr_result(stored_file)
-        parsed = structure_medications(ocr_result.text)
+        ocr_result = await asyncio.to_thread(extract_ocr_result, stored_file)
+        parsed = await asyncio.to_thread(structure_medications, ocr_result.text)
         medications = parsed.get("medications", [])
         if not isinstance(medications, list):
             raise ValueError("The extraction pipeline returned an invalid medication list.")

@@ -1,21 +1,50 @@
 from io import BytesIO
 import re
+from types import SimpleNamespace
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from simpliscribe.main import app
 from simpliscribe.inference import fallback_extract
 from simpliscribe.inference import build_medication_record
+from simpliscribe.inference import call_huggingface
 from simpliscribe.inference import refine_model_medications
 from simpliscribe.ocr import OCRLine, OCRResult
 from simpliscribe.storage import append_history, load_history, save_history
 from simpliscribe.storage import get_analysis_record
-from simpliscribe.config import settings
+from simpliscribe.config import Settings, settings
 
 
 client = TestClient(app)
+
+
+def test_huggingface_client_uses_configured_timeout(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def chat_completion(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"medications": []}'))]
+            )
+
+    monkeypatch.setattr(
+        "simpliscribe.inference.settings",
+        SimpleNamespace(hf_token="test-token", hf_model="test-model", request_timeout_seconds=12.5),
+    )
+    monkeypatch.setattr("simpliscribe.inference.InferenceClient", FakeClient)
+    monkeypatch.setattr("simpliscribe.inference.refine_model_medications", lambda _, medications: medications)
+
+    result = call_huggingface("Paracetamol 650 mg")
+
+    assert result["medications"] == []
+    assert captured["token"] == "test-token"
+    assert captured["timeout"] == 12.5
 
 
 def test_dashboard_route():
@@ -59,34 +88,76 @@ def test_authentication_redirects_and_creates_secure_session():
         )
         assert login_response.status_code == 303
         assert login_response.headers["location"] == "/"
-        assert auth_client.get("/").status_code == 200
+        dashboard = auth_client.get("/")
+        assert dashboard.status_code == 200
+        logout_csrf = re.search(r'action="/logout"[\s\S]*?name="csrf" value="([^"]+)"', dashboard.text).group(1)
+        logout_response = auth_client.post("/logout", data={"csrf": logout_csrf}, follow_redirects=False)
+        assert logout_response.status_code == 303
+        assert logout_response.headers["location"] == "/login"
+        assert auth_client.get("/", follow_redirects=False).status_code == 303
     finally:
         object.__setattr__(settings, "auth_required", original_required)
         object.__setattr__(settings, "admin_email", original_email)
         object.__setattr__(settings, "admin_password", original_password)
 
 
+def test_production_configuration_fails_closed_without_required_secrets():
+    with pytest.raises(RuntimeError, match="Unsafe runtime configuration"):
+        Settings(
+            app_env="production",
+            database_url="sqlite:///data/simpliscribe.db",
+            session_secret="development-only-change-me",
+            admin_password="",
+        ).validate_runtime()
+
+
+def test_production_configuration_requires_an_admin_email():
+    with pytest.raises(RuntimeError, match="ADMIN_EMAIL is required"):
+        Settings(
+            app_env="production",
+            database_url="postgresql://example.test/simpliscribe",
+            session_secret="a" * 32,
+            admin_email=" ",
+            admin_password="correct horse battery staple",
+        ).validate_runtime()
+
+
+def test_runtime_configuration_rejects_an_invalid_session_lifetime():
+    with pytest.raises(RuntimeError, match="SESSION_MAX_AGE_SECONDS must be at least 1"):
+        Settings(session_max_age_seconds=0).validate_runtime()
+
+
 def test_analyze_preserves_parsed_contract_and_pipeline_metadata(monkeypatch):
     original_history = load_history()
-    monkeypatch.setattr(
-        "simpliscribe.web.extract_ocr_result",
-        lambda _: OCRResult(
+    threaded_functions = []
+
+    async def run_inline(func, *args, **kwargs):
+        threaded_functions.append(func)
+        return func(*args, **kwargs)
+
+    def fake_ocr(_):
+        return OCRResult(
             "Paracetamol 650 mg tab od 5 days",
             0.94,
             (OCRLine("Paracetamol 650 mg tab od 5 days", 0.94),),
             (),
-        ),
-    )
-    monkeypatch.setattr(
-        "simpliscribe.web.structure_medications",
-        lambda _: {
+        )
+
+    def fake_structure(_):
+        return {
             "patient_name": "A Patient",
             "doctor_name": "Dr. B",
             "date": "2026-07-10",
             "medications": [{"name": "Paracetamol", "requires_review": True}],
             "pipeline": {"used_provider": "fallback", "warnings": []},
-        },
+        }
+
+    monkeypatch.setattr("simpliscribe.web.asyncio.to_thread", run_inline)
+    monkeypatch.setattr(
+        "simpliscribe.web.extract_ocr_result",
+        fake_ocr,
     )
+    monkeypatch.setattr("simpliscribe.web.structure_medications", fake_structure)
 
     image_buffer = BytesIO()
     Image.new("RGB", (1, 1), "white").save(image_buffer, format="PNG")
@@ -100,6 +171,7 @@ def test_analyze_preserves_parsed_contract_and_pipeline_metadata(monkeypatch):
         assert payload["pipeline"]["ocr_confidence"] == 0.94
         assert payload["review_status"] == "needs_review"
         assert response.headers["cache-control"] == "no-store"
+        assert threaded_functions == [fake_ocr, fake_structure]
     finally:
         save_history(original_history)
 
