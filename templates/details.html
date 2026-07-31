@@ -4,6 +4,7 @@
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>{{ app_name }} | Analysis Details</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml"/>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
@@ -222,6 +223,7 @@
 
             <!-- Sidebar -->
             <aside class="space-y-5 no-print">
+                {% if can_edit %}
                 <section class="rounded-2xl border border-teal-200 bg-teal-50 p-5 shadow-sm">
                     <h2 class="text-sm font-bold text-slate-900">Human review</h2>
                     <p class="mt-2 text-xs leading-5 text-slate-600">Correct extracted fields against the original prescription, then record a review outcome.</p>
@@ -244,6 +246,9 @@
                         <button type="button" data-review-status="rejected" class="col-span-2 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-bold text-red-700">Reject as unreadable</button>
                     </div>
                 </section>
+                {% else %}
+                <section class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-xs leading-5 text-amber-900">Auditor access is read-only. A reviewer must record corrections and outcomes.</section>
+                {% endif %}
                 {% if analysis.raw_text %}
                 <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -273,6 +278,10 @@
                         <div class="flex justify-between">
                             <span class="text-slate-500">With reference candidates</span>
                             <span class="font-bold text-slate-900">{{ analysis.medications | selectattr('substitutes') | list | length }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">Prior review states</span>
+                            <span class="font-bold text-slate-900">{{ analysis.review_versions|default([], true)|length }}</span>
                         </div>
                     </div>
                 </section>

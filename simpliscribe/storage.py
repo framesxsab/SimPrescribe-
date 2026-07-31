@@ -85,10 +85,18 @@ def get_analysis_record(analysis_id: str, owner_id: str = "local") -> dict[str, 
     return json.loads(payload) if payload else None
 
 
-def update_analysis_record(analysis_id: str, owner_id: str, record: dict[str, Any]) -> bool:
+def update_analysis_record(
+    analysis_id: str,
+    owner_id: str,
+    record: dict[str, Any],
+    expected_record: dict[str, Any] | None = None,
+) -> bool:
+    conditions = [analyses.c.id == analysis_id, analyses.c.owner_id == owner_id]
+    if expected_record is not None:
+        conditions.append(analyses.c.payload == json.dumps(expected_record))
     with engine.begin() as connection:
         result = connection.execute(
-            update(analyses).where(analyses.c.id == analysis_id, analyses.c.owner_id == owner_id)
+            update(analyses).where(*conditions)
             .values(payload=json.dumps(record))
         )
         return bool(result.rowcount)
@@ -100,3 +108,23 @@ def append_audit_event(event_id: str, owner_id: str, event_type: str, analysis_i
             id=event_id, owner_id=owner_id, analysis_id=analysis_id, event_type=event_type,
             created_at=_now(), metadata_json=json.dumps(safe_metadata),
         ))
+
+
+def load_audit_events(owner_id: str = "local", limit: int = 100) -> list[dict[str, Any]]:
+    query = (
+        select(audit_events)
+        .where(audit_events.c.owner_id == owner_id)
+        .order_by(audit_events.c.created_at.desc())
+        .limit(min(max(limit, 1), 100))
+    )
+    with engine.connect() as connection:
+        return [
+            {
+                "id": row.id,
+                "analysis_id": row.analysis_id,
+                "event_type": row.event_type,
+                "created_at": row.created_at.isoformat(),
+                "metadata": json.loads(row.metadata_json),
+            }
+            for row in connection.execute(query)
+        ]

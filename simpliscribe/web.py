@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -14,7 +15,7 @@ from .config import settings
 from .inference import structure_medications
 from .ocr import extract_ocr_result, validate_document
 from .reporting import build_pdf_report
-from .security import owner_id, public_user_context, verify_csrf
+from .security import owner_id, public_user_context, require_edit_role, verify_csrf
 from .storage import append_audit_event, append_history, get_analysis_record, load_history, update_analysis_record
 
 
@@ -113,6 +114,7 @@ async def analyze(
     consent: bool = Form(False),
     csrf: str | None = Form(None),
 ) -> JSONResponse:
+    require_edit_role(request)
     owner = owner_id(request)
     if settings.authentication_enabled:
         verify_csrf(request, request.headers.get("X-CSRF-Token") or csrf)
@@ -178,15 +180,26 @@ async def analyze(
 
 
 async def review_analysis(request: Request, analysis_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    require_edit_role(request)
     owner = owner_id(request)
     if settings.authentication_enabled:
         verify_csrf(request, request.headers.get("X-CSRF-Token"))
     analysis = get_analysis_record(analysis_id, owner)
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
+    previous_analysis = deepcopy(analysis)
     status = str(payload.get("status") or "").strip()
     if status not in {"confirmed", "corrected", "rejected"}:
         raise HTTPException(status_code=400, detail="Invalid review status.")
+    review_versions = list(analysis.get("review_versions") or [])
+    review_versions.append({
+        "version": len(review_versions) + 1,
+        "recorded_at": utc_now_iso(),
+        "status": str(analysis.get("review_status") or "needs_review"),
+        "reviewed_at": analysis.get("reviewed_at"),
+        "reviewed_by": analysis.get("reviewed_by"),
+        "medications": deepcopy(analysis.get("medications") or []),
+    })
     medications = payload.get("medications")
     if medications is not None:
         if not isinstance(medications, list) or len(medications) > 50:
@@ -201,6 +214,8 @@ async def review_analysis(request: Request, analysis_id: str, payload: dict[str,
     analysis["review_status"] = status
     analysis["reviewed_at"] = utc_now_iso()
     analysis["reviewed_by"] = owner
-    update_analysis_record(analysis_id, owner, analysis)
-    append_audit_event(str(uuid.uuid4()), owner, "analysis_reviewed", analysis_id, status=status)
-    return {"analysis_id": analysis_id, "review_status": status, "reviewed_at": analysis["reviewed_at"]}
+    analysis["review_versions"] = review_versions
+    if not update_analysis_record(analysis_id, owner, analysis, expected_record=previous_analysis):
+        raise HTTPException(status_code=409, detail="Analysis was updated by another reviewer. Reload and try again.")
+    append_audit_event(str(uuid.uuid4()), owner, "analysis_reviewed", analysis_id, status=status, review_version=len(review_versions))
+    return {"analysis_id": analysis_id, "review_status": status, "reviewed_at": analysis["reviewed_at"], "review_version": len(review_versions)}

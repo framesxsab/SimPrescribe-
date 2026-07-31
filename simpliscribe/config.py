@@ -21,6 +21,13 @@ class Settings:
     session_secret: str = os.environ.get("SESSION_SECRET", "development-only-change-me")
     admin_email: str = os.environ.get("ADMIN_EMAIL", "admin@localhost")
     admin_password: str = os.environ.get("ADMIN_PASSWORD", "")
+    admin_role: str = os.environ.get("ADMIN_ROLE", "admin").strip().lower()
+    oidc_issuer: str = os.environ.get("OIDC_ISSUER", "").strip().rstrip("/")
+    oidc_client_id: str = os.environ.get("OIDC_CLIENT_ID", "").strip()
+    oidc_client_secret: str = os.environ.get("OIDC_CLIENT_SECRET", "")
+    oidc_redirect_uri: str = os.environ.get("OIDC_REDIRECT_URI", "").strip()
+    oidc_admin_subjects: str = os.environ.get("OIDC_ADMIN_SUBJECTS", "")
+    oidc_reviewer_subjects: str = os.environ.get("OIDC_REVIEWER_SUBJECTS", "")
     auth_required: bool = os.environ.get("AUTH_REQUIRED", "").strip().lower() in {"1", "true", "yes", "on"}
     retention_days: int = int(os.environ.get("RETENTION_DAYS", "30"))
     session_max_age_seconds: int = int(os.environ.get("SESSION_MAX_AGE_SECONDS", "28800"))
@@ -55,7 +62,16 @@ class Settings:
 
     @property
     def authentication_enabled(self) -> bool:
-        return self.production or self.auth_required
+        return self.production or self.auth_required or self.oidc_enabled
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret and self.oidc_redirect_uri)
+
+    @property
+    def oidc_subject_roles(self) -> tuple[set[str], set[str]]:
+        parse = lambda value: {item.strip() for item in value.split(",") if item.strip()}
+        return parse(self.oidc_admin_subjects), parse(self.oidc_reviewer_subjects)
 
     @property
     def secure_transport(self) -> bool:
@@ -66,16 +82,27 @@ class Settings:
         if self.production:
             if self.session_secret == "development-only-change-me" or len(self.session_secret) < 32:
                 errors.append("SESSION_SECRET must be a unique value of at least 32 characters")
-            if not self.admin_password:
-                errors.append("ADMIN_PASSWORD is required")
-            if not self.admin_email.strip():
-                errors.append("ADMIN_EMAIL is required")
-            if self.database_url.startswith("sqlite"):
-                errors.append("DATABASE_URL must use a production database such as PostgreSQL")
+            if not self.oidc_enabled:
+                if not self.admin_password:
+                    errors.append("ADMIN_PASSWORD is required")
+                if not self.admin_email.strip():
+                    errors.append("ADMIN_EMAIL is required")
+            if not self.database_url.startswith("postgresql"):
+                errors.append("DATABASE_URL must use PostgreSQL in production")
         if self.retention_days < 1:
             errors.append("RETENTION_DAYS must be at least 1")
         if self.session_max_age_seconds < 1:
             errors.append("SESSION_MAX_AGE_SECONDS must be at least 1")
+        if self.admin_role not in {"admin", "reviewer", "auditor"}:
+            errors.append("ADMIN_ROLE must be admin, reviewer, or auditor")
+        oidc_values = (self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret, self.oidc_redirect_uri)
+        if any(oidc_values) and not all(oidc_values):
+            errors.append("OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, and OIDC_REDIRECT_URI must be configured together")
+        if self.oidc_enabled and self.production:
+            if not self.oidc_issuer.startswith("https://"):
+                errors.append("OIDC_ISSUER must use HTTPS in production")
+            if not self.oidc_redirect_uri.startswith("https://"):
+                errors.append("OIDC_REDIRECT_URI must use HTTPS in production")
         if errors:
             raise RuntimeError("Unsafe runtime configuration: " + "; ".join(errors))
 

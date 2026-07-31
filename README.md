@@ -178,6 +178,17 @@ For a clinically meaningful evaluation, replace the samples with de-identified, 
 4. Replace the bootstrap-admin login with external identity, role/tenant claims, and managed migrations before onboarding multiple reviewers.
 5. Complete operational security, accessibility, workflow, and prospective clinical validation before production use.
 
+### Shipped workflow safeguards
+
+Requirements reviewed from supplied course material were distilled without copying personal details. The following can improve this review aid without turning it into a diagnosis or prescribing system:
+
+1. **Role-scoped reviewer access:** bootstrap deployments can assign `admin`, `reviewer`, or read-only `auditor`; edit routes enforce reviewer/admin server-side. Optional OpenID Connect sign-in maps immutable provider subjects to admin/reviewer roles and defaults all others to read-only auditor access.
+2. **Final-report integrity:** each review preserves the prior medication and review state as a numbered version, rejects stale concurrent updates, emits an audit event, and exposes owner-scoped audit retrieval at `/api/audit`; use managed database migrations before independently evolving deployed versions.
+3. **Operational recovery:** the guarded [PostgreSQL recovery verifier](docs/PRODUCTION_RECOVERY.md) can verify a backup against a disposable private restore database; record the result in the approved operations system before retaining identifiable data.
+4. **Accessible report output:** PDF and on-screen reports are readable, printable, explicit about human verification, and show how many prior review states are preserved.
+
+These are technical safeguards, not clinical validation. SimpliScribe will not add patient registration, consultation/diagnosis records, automatic treatment decisions, medicine reminders, or drug-interaction decisioning without a separately approved clinical, privacy, and governance design.
+
 Code is MIT licensed. Dataset files may have separate upstream terms; verify and document those terms before redistribution.
 
 ## Docker deployment
@@ -199,9 +210,20 @@ INFERENCE_PROVIDER=fallback
 REQUEST_TIMEOUT_SECONDS=60
 ```
 
-Production behavior includes a single bootstrap-admin session, signed HTTP-only cookies, CSRF validation, explicit upload consent, automatic analysis expiry, redacted audit events, protected history/details/reports/review APIs, analysis concurrency limits, CSP/HSTS headers, and a non-root container liveness check. It is not yet a multi-user identity or RBAC system.
+For managed identity, replace bootstrap credentials with these deployment secrets:
 
-The configured administrator is a deployment bootstrap account. For an organization or multiple reviewers, replace it with an external identity provider before onboarding users. Database creation currently uses SQLAlchemy metadata initialization; adopt managed migrations before independently evolving multiple deployed versions.
+```bash
+OIDC_ISSUER=https://identity.example.com
+OIDC_CLIENT_ID=<client-id>
+OIDC_CLIENT_SECRET=<secret-manager-value>
+OIDC_REDIRECT_URI=https://app.example.com/auth/callback
+OIDC_ADMIN_SUBJECTS=<comma-separated-provider-subject-ids>
+OIDC_REVIEWER_SUBJECTS=<comma-separated-provider-subject-ids>
+```
+
+Production behavior includes signed HTTP-only cookies, CSRF validation, explicit upload consent, automatic analysis expiry, redacted audit events, protected history/details/reports/review APIs, analysis concurrency limits, CSP/HSTS headers, and a non-root container liveness check. OIDC users map to admin/reviewer/auditor roles; unmapped users are read-only auditors.
+
+The configured administrator is a local bootstrap account. Use OIDC before onboarding multiple reviewers. Database creation currently uses SQLAlchemy metadata initialization; adopt managed migrations before independently evolving multiple deployed versions.
 
 The review screen supports correction, confirmation, unreadable rejection, and sign-out for shared workstations. Original uploads are removed after processing, so reviewers must compare against their own source document during the active workflow. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing. Configure request-size limits at the ingress/proxy as well as `MAX_UPLOAD_MB`; multipart bodies reach the server before application validation.
 

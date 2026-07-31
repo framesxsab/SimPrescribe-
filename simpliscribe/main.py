@@ -3,15 +3,15 @@ import time
 import uuid
 from collections import defaultdict, deque
 
-from fastapi import FastAPI, Form, Request, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
-from .security import authenticate, current_user, csrf_token, verify_csrf
-from .storage import append_audit_event, load_history
+from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, oidc_authorization_url, owner_id, verify_csrf
+from .storage import append_audit_event, load_audit_events, load_history
 from .web import analyze, download_report, history_payload, render_dashboard, render_details, render_history, review_analysis
 
 settings.validate_runtime()
@@ -28,7 +28,7 @@ _analysis_slots = asyncio.Semaphore(2)
 @app.middleware("http")
 async def protect_health_data_responses(request: Request, call_next):
     response = None
-    if settings.authentication_enabled and request.url.path not in {"/login", "/api/health", "/api/live"} and not request.url.path.startswith("/static/"):
+    if settings.authentication_enabled and request.url.path not in {"/login", "/login/oidc", "/auth/callback", "/api/health", "/api/live"} and not request.url.path.startswith("/static/"):
         if current_user(request) is None:
             if request.url.path.startswith("/api/"):
                 response = JSONResponse(status_code=401, content={"detail": "Authentication required."})
@@ -82,19 +82,41 @@ async def health() -> dict:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": ""})
+    return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "", "oidc_enabled": settings.oidc_enabled})
 
 
 @app.post("/login", response_class=HTMLResponse)
 async def login(request: Request, email: str = Form(...), password: str = Form(...), csrf: str = Form(...)):
+    if settings.oidc_enabled:
+        raise HTTPException(status_code=404, detail="Use organization sign-in.")
     verify_csrf(request, csrf)
     user = authenticate(email, password)
     if user is None:
-        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "Invalid email or password."}, status_code=401)
+        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "Invalid email or password.", "oidc_enabled": settings.oidc_enabled}, status_code=401)
     request.session.clear()
     request.session["user"] = user
     csrf_token(request)
     append_audit_event(str(uuid.uuid4()), user["id"], "login_succeeded")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/login/oidc")
+async def login_oidc(request: Request):
+    return RedirectResponse(await oidc_authorization_url(request), status_code=303)
+
+
+@app.get("/auth/callback", response_class=HTMLResponse)
+async def oidc_callback(request: Request, state: str = "", code: str = "", error: str = ""):
+    if error:
+        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "Organization sign-in was not completed.", "oidc_enabled": settings.oidc_enabled}, status_code=401)
+    try:
+        user = await authenticate_oidc_callback(request, state, code)
+    except HTTPException as exc:
+        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": exc.detail, "oidc_enabled": settings.oidc_enabled}, status_code=exc.status_code)
+    request.session.clear()
+    request.session["user"] = user
+    csrf_token(request)
+    append_audit_event(str(uuid.uuid4()), user["id"], "login_succeeded", method="oidc")
     return RedirectResponse("/", status_code=303)
 
 
@@ -126,6 +148,11 @@ async def serve_details(request: Request, analysis_id: str) -> HTMLResponse:
 @app.get("/api/history")
 async def get_history(request: Request) -> dict:
     return await history_payload(request)
+
+
+@app.get("/api/audit")
+async def get_audit(request: Request) -> dict:
+    return {"events": load_audit_events(owner_id(request))}
 
 
 @app.post("/api/analyze")

@@ -3,6 +3,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.playwright-cli/
+tmp/
 .venv/
 archive (3)/
 synthetic_prescription_dataset/

@@ -4,6 +4,7 @@
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>{{ app_name }} | Analysis History</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml"/>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
     <style>
@@ -36,9 +37,27 @@
         </div>
 
         {% if analyses %}
-        <div class="grid gap-5">
+        <div class="mb-6 grid gap-3 sm:grid-cols-[1fr_auto]">
+            <label class="block">
+                <span class="sr-only">Search analyses</span>
+                <input id="history-search" type="search" placeholder="Search file, patient, prescriber, or medicine" class="w-full rounded-xl border-slate-300 px-4 py-2.5 text-sm shadow-sm focus:border-slate-900 focus:ring-slate-900">
+            </label>
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <span>Review status</span>
+                <select id="review-filter" class="rounded-xl border-slate-300 py-2.5 text-sm shadow-sm focus:border-slate-900 focus:ring-slate-900">
+                    <option value="">All</option>
+                    <option value="needs_review">Needs review</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="corrected">Corrected</option>
+                    <option value="rejected">Rejected</option>
+                </select>
+            </label>
+        </div>
+        <p id="history-filter-result" class="mb-4 text-sm text-slate-500" aria-live="polite"></p>
+        <div class="grid gap-5" id="history-list">
             {% for analysis in analyses %}
-            <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm hover:border-slate-300 transition-colors">
+            {% set review_status = analysis.review_status or 'needs_review' %}
+            <article class="history-item rounded-2xl border border-slate-200 bg-white p-6 shadow-sm hover:border-slate-300 transition-colors" data-review-status="{{ review_status }}">
                 <div class="flex flex-col gap-5">
                     <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                         <div>
@@ -49,6 +68,15 @@
                             </p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2">
+                            {% if review_status == 'confirmed' %}
+                            <span class="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">Confirmed</span>
+                            {% elif review_status == 'corrected' %}
+                            <span class="rounded-full bg-teal-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-teal-700">Corrected</span>
+                            {% elif review_status == 'rejected' %}
+                            <span class="rounded-full bg-rose-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-rose-700">Rejected</span>
+                            {% else %}
+                            <span class="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-800">Needs review</span>
+                            {% endif %}
                             <span class="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">{{ analysis.medications|length }} meds</span>
                             <span class="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
                                 {% set sources = [] %}
@@ -114,6 +142,26 @@
             </article>
             {% endfor %}
         </div>
+        <script>
+            const search = document.getElementById('history-search');
+            const filter = document.getElementById('review-filter');
+            const result = document.getElementById('history-filter-result');
+            const items = [...document.querySelectorAll('.history-item')];
+            const applyFilters = () => {
+                const query = search.value.trim().toLowerCase();
+                const status = filter.value;
+                let visible = 0;
+                items.forEach((item) => {
+                    const matches = (!query || item.textContent.toLowerCase().includes(query)) && (!status || item.dataset.reviewStatus === status);
+                    item.hidden = !matches;
+                    if (matches) visible += 1;
+                });
+                result.textContent = `${visible} ${visible === 1 ? 'analysis' : 'analyses'} shown`;
+            };
+            search.addEventListener('input', applyFilters);
+            filter.addEventListener('change', applyFilters);
+            applyFilters();
+        </script>
         {% else %}
         <section class="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
             <h2 class="text-2xl font-bold text-slate-900">No analyses saved yet</h2>

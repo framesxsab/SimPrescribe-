@@ -101,22 +101,26 @@ def get_ocr_reader() -> Any:
             {
                 "lang": settings.ocr_language,
                 "device": "gpu" if settings.ocr_use_gpu else "cpu",
+                "enable_mkldnn": False,
                 "use_textline_orientation": True,
                 "show_log": False,
             },
             {
                 "lang": settings.ocr_language,
                 "device": "gpu" if settings.ocr_use_gpu else "cpu",
+                "enable_mkldnn": False,
                 "use_textline_orientation": True,
             },
             {
                 "lang": settings.ocr_language,
+                "enable_mkldnn": False,
                 "use_angle_cls": True,
                 "use_gpu": settings.ocr_use_gpu,
                 "show_log": False,
             },
             {
                 "lang": settings.ocr_language,
+                "enable_mkldnn": False,
                 "use_angle_cls": True,
                 "use_gpu": settings.ocr_use_gpu,
             },
