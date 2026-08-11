@@ -22,7 +22,30 @@ app = FastAPI(title=f"{settings.app_name} API")
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 _request_times: dict[str, deque[float]] = defaultdict(deque)
+_login_times: dict[str, deque[float]] = defaultdict(deque)
+_MAX_BUCKETS = 4096
 _analysis_slots = asyncio.Semaphore(2)
+
+
+def _rate_limit_key(request: Request) -> str:
+    if settings.trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        first = forwarded.split(",")[0].strip() if forwarded else ""
+        if first:
+            return first
+    return request.client.host if request.client else "unknown"
+
+
+def _consume_bucket(buckets: dict[str, deque[float]], key: str, now: float, window: float, limit: int) -> bool:
+    if key not in buckets and len(buckets) >= _MAX_BUCKETS:
+        buckets.pop(next(iter(buckets)))
+    bucket = buckets.setdefault(key, deque())
+    while bucket and bucket[0] < now - window:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        return False
+    bucket.append(now)
+    return True
 
 
 @app.middleware("http")
@@ -90,6 +113,8 @@ async def login(request: Request, email: str = Form(...), password: str = Form(.
     if settings.oidc_enabled:
         raise HTTPException(status_code=404, detail="Use organization sign-in.")
     verify_csrf(request, csrf)
+    if not _consume_bucket(_login_times, _rate_limit_key(request), time.monotonic(), 60, 20):
+        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "Too many login attempts. Try again later.", "oidc_enabled": settings.oidc_enabled}, status_code=429)
     user = authenticate(email, password)
     if user is None:
         return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "Invalid email or password.", "oidc_enabled": settings.oidc_enabled}, status_code=401)
@@ -157,14 +182,10 @@ async def get_audit(request: Request) -> dict:
 
 @app.post("/api/analyze")
 async def analyze_prescription(request: Request, file: UploadFile, consent: bool = Form(False), csrf: str | None = Form(None)):
-    key = request.client.host if request.client else "unknown"
+    key = _rate_limit_key(request)
     now = time.monotonic()
-    bucket = _request_times[key]
-    while bucket and bucket[0] < now - 60:
-        bucket.popleft()
-    if len(bucket) >= 10:
+    if not _consume_bucket(_request_times, key, now, 60, 10):
         return JSONResponse(status_code=429, content={"detail": "Too many analysis requests. Try again later."})
-    bucket.append(now)
     async with _analysis_slots:
         return await analyze(request, file, consent, csrf)
 

@@ -41,6 +41,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 UNKNOWN_KEYS = {"", "unknown medication", "unknown", "na", "n a", "none"}
 
+_CACHE_MAX_ENTRIES = 512
 _cache: dict[str, tuple[float, list[dict[str, str]]]] = {}
 
 _SCAN_STOP = {
@@ -65,6 +66,8 @@ def _cache_get(key: str) -> list[dict[str, str]] | None:
 
 
 def _cache_set(key: str, value: list[dict[str, str]]) -> None:
+    if key not in _cache and len(_cache) >= _CACHE_MAX_ENTRIES:
+        _cache.pop(next(iter(_cache)))
     _cache[key] = (time.time(), value)
 
 

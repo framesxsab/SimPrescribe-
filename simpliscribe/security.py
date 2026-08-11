@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import json
 import secrets
 from typing import Any
 from urllib.parse import urlencode, urlparse
@@ -89,12 +90,35 @@ def oidc_user_from_claims(claims: dict[str, Any]) -> dict[str, str]:
     return {"id": f"oidc:{user_id}", "email": email.strip().lower() if isinstance(email, str) and email.strip() else subject, "role": role}
 
 
+def _id_token_audiences(token_payload: dict[str, Any]) -> list[str]:
+    id_token = token_payload.get("id_token")
+    if not isinstance(id_token, str) or "." not in id_token:
+        return []
+    try:
+        segment = id_token.split(".")[1]
+        segment += "=" * (-len(segment) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(segment))
+    except Exception:
+        return []
+    if not isinstance(claims, dict):
+        return []
+    aud = claims.get("aud")
+    if isinstance(aud, str):
+        return [aud]
+    if isinstance(aud, list):
+        return [str(item) for item in aud if isinstance(item, str)]
+    return []
+
+
 async def authenticate_oidc_callback(request: Request, state: str, code: str) -> dict[str, str]:
     pending = request.session.pop("oidc", None)
     if not isinstance(pending, dict) or not state or not hmac.compare_digest(str(pending.get("state") or ""), state):
         raise HTTPException(status_code=400, detail="Invalid organization sign-in state.")
     if not code:
         raise HTTPException(status_code=400, detail="Missing organization sign-in code.")
+    verifier = str(pending.get("verifier") or "")
+    if not verifier:
+        raise HTTPException(status_code=400, detail="Invalid organization sign-in session.")
     configuration = await _oidc_configuration()
     async with httpx.AsyncClient(timeout=10) as client:
         token_response = await client.post(
@@ -105,11 +129,15 @@ async def authenticate_oidc_callback(request: Request, state: str, code: str) ->
                 "redirect_uri": settings.oidc_redirect_uri,
                 "client_id": settings.oidc_client_id,
                 "client_secret": settings.oidc_client_secret,
-                "code_verifier": str(pending.get("verifier") or ""),
+                "code_verifier": verifier,
             },
         )
         token_response.raise_for_status()
-        access_token = token_response.json().get("access_token")
+        token_payload = token_response.json()
+        audiences = _id_token_audiences(token_payload)
+        if audiences and settings.oidc_client_id not in audiences:
+            raise HTTPException(status_code=401, detail="Organization sign-in token audience is invalid.")
+        access_token = token_payload.get("access_token")
         if not isinstance(access_token, str) or not access_token:
             raise HTTPException(status_code=401, detail="Organization sign-in did not return an access token.")
         userinfo_response = await client.get(configuration["userinfo_endpoint"], headers={"Authorization": f"Bearer {access_token}"})

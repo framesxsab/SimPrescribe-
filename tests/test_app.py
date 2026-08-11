@@ -29,6 +29,12 @@ from simpliscribe.config import Settings, settings
 client = TestClient(app)
 
 
+def csrf_for(test_client) -> str:
+    response = test_client.get("/login")
+    match = re.search(r'name="csrf" value="([^"]+)"', response.text)
+    return match.group(1) if match else ""
+
+
 def test_huggingface_client_uses_configured_timeout(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -459,7 +465,7 @@ def test_analyze_preserves_parsed_contract_and_pipeline_metadata(monkeypatch):
     Image.new("RGB", (1, 1), "white").save(image_buffer, format="PNG")
     image = image_buffer.getvalue()
     try:
-        response = client.post("/api/analyze", data={"consent": "true"}, files={"file": ("rx.png", image, "image/png")})
+        response = client.post("/api/analyze", data={"consent": "true", "csrf": csrf_for(client)}, files={"file": ("rx.png", image, "image/png")})
         assert response.status_code == 200
         payload = response.json()
         assert payload["medications"] == [{"name": "Paracetamol", "requires_review": True}]
@@ -475,7 +481,7 @@ def test_analyze_preserves_parsed_contract_and_pipeline_metadata(monkeypatch):
 def test_analyze_rejects_spoofed_image_and_removes_upload():
     before = {path.name for path in settings.uploads_dir.iterdir()}
 
-    response = client.post("/api/analyze", data={"consent": "true"}, files={"file": ("fake.png", b"not an image", "image/png")})
+    response = client.post("/api/analyze", data={"consent": "true", "csrf": csrf_for(client)}, files={"file": ("fake.png", b"not an image", "image/png")})
 
     assert response.status_code == 400
     assert "not a valid supported image" in response.json()["detail"]
@@ -483,7 +489,7 @@ def test_analyze_rejects_spoofed_image_and_removes_upload():
 
 
 def test_analyze_requires_explicit_consent():
-    response = client.post("/api/analyze", files={"file": ("rx.png", b"not an image", "image/png")})
+    response = client.post("/api/analyze", data={"csrf": csrf_for(client)}, files={"file": ("rx.png", b"not an image", "image/png")})
     assert response.status_code == 400
     assert response.json()["detail"] == "Explicit processing consent is required."
 
@@ -528,6 +534,7 @@ def test_review_endpoint_updates_owned_analysis():
         response = client.patch(
             "/api/analyses/review-test-id/review",
             json={"status": "corrected", "medications": [{"name": "Paracetamol"}]},
+            headers={"X-CSRF-Token": csrf_for(client)},
         )
         assert response.status_code == 200
         updated = get_analysis_record("review-test-id")
@@ -544,7 +551,7 @@ def test_review_endpoint_updates_owned_analysis():
                 "medications": [{"name": "Paracetmol", "type": "Tablet", "dosage": "650 mg", "frequency": "once daily", "duration": "5 days"}],
             }
         ]
-        response = client.patch("/api/analyses/review-test-id/review", json={"status": "confirmed"})
+        response = client.patch("/api/analyses/review-test-id/review", json={"status": "confirmed"}, headers={"X-CSRF-Token": csrf_for(client)})
         assert response.status_code == 200
         updated = get_analysis_record("review-test-id")
         assert updated["review_versions"][1]["status"] == "corrected"
@@ -559,7 +566,7 @@ def test_analyze_removes_upload_when_ocr_is_unusable(monkeypatch):
     image_buffer = BytesIO()
     Image.new("RGB", (2, 2), "white").save(image_buffer, format="PNG")
 
-    response = client.post("/api/analyze", data={"consent": "true"}, files={"file": ("rx.png", image_buffer.getvalue(), "image/png")})
+    response = client.post("/api/analyze", data={"consent": "true", "csrf": csrf_for(client)}, files={"file": ("rx.png", image_buffer.getvalue(), "image/png")})
 
     assert response.status_code == 422
     assert response.json()["error_code"] == "UNUSABLE_PRESCRIPTION"

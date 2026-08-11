@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hmac
 from functools import lru_cache
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from .config import settings
@@ -123,10 +124,18 @@ def health() -> dict[str, str]:
 
 
 @app.post("/extract", response_model=ExtractResponse)
-def extract(request: ExtractRequest) -> ExtractResponse:
+def extract(request: ExtractRequest, authorization: str | None = Header(default=None)) -> ExtractResponse:
+    if settings.model_server_api_key:
+        expected = f"Bearer {settings.model_server_api_key}"
+        if not authorization or not hmac.compare_digest(authorization, expected):
+            raise HTTPException(status_code=401, detail="Invalid or missing model server credentials.")
     raw_text = request.input.strip()
     if not raw_text:
         raise HTTPException(status_code=400, detail="The input field must contain OCR text.")
+    if len(raw_text) > settings.model_server_max_input_chars:
+        raise HTTPException(status_code=413, detail=f"Input exceeds the {settings.model_server_max_input_chars}-character limit.")
+    if request.prompt and len(request.prompt) > settings.model_server_max_input_chars:
+        raise HTTPException(status_code=413, detail=f"Prompt exceeds the {settings.model_server_max_input_chars}-character limit.")
 
     try:
         output = generate_output(raw_text, request.prompt)

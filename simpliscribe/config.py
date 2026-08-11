@@ -59,6 +59,12 @@ class Settings:
     alternatives_timeout_seconds: float = float(os.environ.get("ALTERNATIVES_TIMEOUT_SECONDS", "15"))
     alternatives_cache_ttl_seconds: int = int(os.environ.get("ALTERNATIVES_CACHE_TTL_SECONDS", "86400"))
     alternatives_max_candidates: int = int(os.environ.get("ALTERNATIVES_MAX_CANDIDATES", "5"))
+    # When the app sits behind a trusted reverse proxy, rate limiting keys on the
+    # first X-Forwarded-For hop instead of the proxy's own IP. Keep this OFF unless
+    # the proxy strips inbound X-Forwarded-For from clients (otherwise it is spoofable).
+    trust_proxy_headers: bool = os.environ.get("TRUST_PROXY_HEADERS", "false").strip().lower() in {"1", "true", "yes", "on"}
+    model_server_api_key: str = os.environ.get("MODEL_SERVER_API_KEY", "").strip()
+    model_server_max_input_chars: int = int(os.environ.get("MODEL_SERVER_MAX_INPUT_CHARS", "20000"))
 
     @property
     def max_upload_bytes(self) -> int:
@@ -116,6 +122,8 @@ class Settings:
             errors.append("ALTERNATIVES_MAX_CANDIDATES must be between 1 and 10")
         if self.alternatives_timeout_seconds < 1:
             errors.append("ALTERNATIVES_TIMEOUT_SECONDS must be at least 1")
+        if self.model_server_max_input_chars < 1000:
+            errors.append("MODEL_SERVER_MAX_INPUT_CHARS must be at least 1000")
         oidc_values = (self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret, self.oidc_redirect_uri)
         if any(oidc_values) and not all(oidc_values):
             errors.append("OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, and OIDC_REDIRECT_URI must be configured together")

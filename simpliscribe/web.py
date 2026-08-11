@@ -116,8 +116,7 @@ async def analyze(
 ) -> JSONResponse:
     require_edit_role(request)
     owner = owner_id(request)
-    if settings.authentication_enabled:
-        verify_csrf(request, request.headers.get("X-CSRF-Token") or csrf)
+    verify_csrf(request, request.headers.get("X-CSRF-Token") or csrf)
     if not consent:
         raise HTTPException(status_code=400, detail="Explicit processing consent is required.")
     stored_file = await save_upload(file)
@@ -182,8 +181,7 @@ async def analyze(
 async def review_analysis(request: Request, analysis_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     require_edit_role(request)
     owner = owner_id(request)
-    if settings.authentication_enabled:
-        verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
     analysis = get_analysis_record(analysis_id, owner)
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
@@ -191,7 +189,7 @@ async def review_analysis(request: Request, analysis_id: str, payload: dict[str,
     status = str(payload.get("status") or "").strip()
     if status not in {"confirmed", "corrected", "rejected"}:
         raise HTTPException(status_code=400, detail="Invalid review status.")
-    review_versions = list(analysis.get("review_versions") or [])
+    review_versions = list(analysis.get("review_versions") or [])[:20]
     review_versions.append({
         "version": len(review_versions) + 1,
         "recorded_at": utc_now_iso(),
