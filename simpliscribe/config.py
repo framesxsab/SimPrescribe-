@@ -51,6 +51,14 @@ class Settings:
     local_model_temperature: float = float(os.environ.get("LOCAL_MODEL_TEMPERATURE", "0.1"))
     local_model_max_new_tokens: int = int(os.environ.get("LOCAL_MODEL_MAX_NEW_TOKENS", "256"))
     local_model_trust_remote_code: bool = os.environ.get("LOCAL_MODEL_TRUST_REMOTE_CODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+    # Alternative medicine reference candidates. Disabled by default (fail-closed):
+    # enabling this sends the canonical medicine name to the configured model and/or
+    # a DuckDuckGo web search when the local datasets provide no substitutes.
+    alternatives_enabled: bool = os.environ.get("ALTERNATIVES_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    alternatives_provider: str = os.environ.get("ALTERNATIVES_PROVIDER", "auto").strip().lower()
+    alternatives_timeout_seconds: float = float(os.environ.get("ALTERNATIVES_TIMEOUT_SECONDS", "15"))
+    alternatives_cache_ttl_seconds: int = int(os.environ.get("ALTERNATIVES_CACHE_TTL_SECONDS", "86400"))
+    alternatives_max_candidates: int = int(os.environ.get("ALTERNATIVES_MAX_CANDIDATES", "5"))
 
     @property
     def max_upload_bytes(self) -> int:
@@ -77,6 +85,13 @@ class Settings:
     def secure_transport(self) -> bool:
         return self.production or self.session_https_only
 
+    @property
+    def alternatives_provider_chain(self) -> list[str]:
+        provider = self.alternatives_provider
+        if provider in {"model", "web", "duckduckgo"}:
+            return ["web" if provider == "duckduckgo" else provider]
+        return ["model", "web"]
+
     def validate_runtime(self) -> None:
         errors: list[str] = []
         if self.production:
@@ -95,6 +110,12 @@ class Settings:
             errors.append("SESSION_MAX_AGE_SECONDS must be at least 1")
         if self.admin_role not in {"admin", "reviewer", "auditor"}:
             errors.append("ADMIN_ROLE must be admin, reviewer, or auditor")
+        if self.alternatives_provider not in {"auto", "model", "web", "duckduckgo"}:
+            errors.append("ALTERNATIVES_PROVIDER must be auto, model, web, or duckduckgo")
+        if self.alternatives_max_candidates < 1 or self.alternatives_max_candidates > 10:
+            errors.append("ALTERNATIVES_MAX_CANDIDATES must be between 1 and 10")
+        if self.alternatives_timeout_seconds < 1:
+            errors.append("ALTERNATIVES_TIMEOUT_SECONDS must be at least 1")
         oidc_values = (self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret, self.oidc_redirect_uri)
         if any(oidc_values) and not all(oidc_values):
             errors.append("OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, and OIDC_REDIRECT_URI must be configured together")

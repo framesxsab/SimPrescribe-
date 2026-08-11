@@ -853,19 +853,27 @@ def enrich_medications(medications: list[dict[str, Any]]) -> list[dict[str, Any]
         match = find_medicine_match(name)
         entry = match.entry if match else None
         normalized.append(
-            build_medication_record(
-                name=name,
-                category=str(medication.get("category") or "General"),
-                medication_type=str(medication.get("type") or "Medication"),
-                dosage=str(medication.get("dosage") or "N/A"),
-                frequency=str(medication.get("frequency") or "N/A"),
-                duration=str(medication.get("duration") or "N/A"),
-                insight=str(medication.get("insight") or DEFAULT_INSIGHT),
-                entry=entry,
-                match=match,
+            _attach_alternatives(
+                build_medication_record(
+                    name=name,
+                    category=str(medication.get("category") or "General"),
+                    medication_type=str(medication.get("type") or "Medication"),
+                    dosage=str(medication.get("dosage") or "N/A"),
+                    frequency=str(medication.get("frequency") or "N/A"),
+                    duration=str(medication.get("duration") or "N/A"),
+                    insight=str(medication.get("insight") or DEFAULT_INSIGHT),
+                    entry=entry,
+                    match=match,
+                )
             )
         )
     return normalized
+
+
+def _attach_alternatives(payload: dict[str, Any]) -> dict[str, Any]:
+    from .alternatives import attach_alternative_candidates  # deferred to avoid circular import
+
+    return attach_alternative_candidates(payload)
 
 
 def refine_model_medications(raw_text: str, medications: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -992,16 +1000,18 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
         if entry and entry.dosage_form and dosage_form == "Medication":
             medication_type = title_case(entry.dosage_form)
         medications.append(
-            build_medication_record(
-                name=name,
-                category=category,
-                medication_type=medication_type,
-                dosage=extract_dosage(segment, dosage_form),
-                frequency=frequency,
-                duration=duration,
-                insight=build_insight(entry, frequency, duration, dosage_form),
-                entry=entry,
-                match=match,
+            _attach_alternatives(
+                build_medication_record(
+                    name=name,
+                    category=category,
+                    medication_type=medication_type,
+                    dosage=extract_dosage(segment, dosage_form),
+                    frequency=frequency,
+                    duration=duration,
+                    insight=build_insight(entry, frequency, duration, dosage_form),
+                    entry=entry,
+                    match=match,
+                )
             )
         )
 

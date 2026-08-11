@@ -160,7 +160,7 @@
                 <div class="mt-8 space-y-4">
                     <h2 class="text-lg font-bold text-slate-900">Detailed Medicine Reference</h2>
                     {% for med in analysis.medications %}
-                    {% if med.substitutes or med.uses or med.side_effects or med.chemical_class or med.therapeutic_class %}
+                    {% if med.substitutes or med.uses or med.side_effects or med.chemical_class or med.therapeutic_class or med.web_alternatives %}
                     <details class="group bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                         <summary class="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-slate-50 transition-colors list-none">
                             <div class="flex items-center gap-3">
@@ -191,6 +191,22 @@
                                     <span class="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">{{ item }}</span>
                                     {% endfor %}
                                 </div>
+                            </div>
+                            {% endif %}
+                            {% if med.web_alternatives %}
+                            <div class="rounded-xl bg-indigo-50 border border-indigo-100 p-4">
+                                <p class="text-[10px] uppercase font-bold text-indigo-600 tracking-wider mb-2">Web-sourced reference candidates ({{ med.web_alternatives|length }})</p>
+                                <ul class="space-y-1.5">
+                                    {% for item in med.web_alternatives %}
+                                    <li class="text-sm text-slate-700">
+                                        <span class="font-semibold text-slate-900">{{ item.name }}</span>
+                                        {% if item.url %}
+                                        <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:underline text-xs">source</a>
+                                        {% endif %}
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                                <p class="mt-2 text-xs text-indigo-700">Sourced from a model or web search — not recommendations. Verify with a prescriber before any change.</p>
                             </div>
                             {% endif %}
                             {% if med.uses %}
