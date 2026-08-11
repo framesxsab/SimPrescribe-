@@ -117,9 +117,15 @@ def candidate_names_in_text(text: str) -> list[str]:
 
 
 def _display_name(key: str, fallback: str) -> str | None:
-    entry = load_medicine_lexicon().get(key)
-    display = entry.name if entry else title_case(fallback)
-    if is_junk_medication(display):
+    lexicon = load_medicine_lexicon()
+    if key not in lexicon:
+        if len(key) < 3:
+            return None
+        prefix_hits = [alias for alias, _ in _lexicon_first_token_index().get(key.split(" ", 1)[0], ()) if alias.startswith(key)]
+        if not prefix_hits:
+            return None
+    display = title_case(fallback)
+    if is_junk_medication(display.replace("/", " ")):
         return None
     return display
 
@@ -205,7 +211,6 @@ def call_web_alternatives(name: str) -> list[dict[str, str]]:
         results = list(ddgs.text(query, max_results=5))
     if not results:
         return []
-    lexicon = load_medicine_lexicon()
     key = normalize_text(name)
     found: dict[str, str] = {}
     for result in results:
@@ -217,7 +222,7 @@ def call_web_alternatives(name: str) -> list[dict[str, str]]:
             found.setdefault(alias, url)
     items: list[dict[str, str]] = []
     for alias, url in found.items():
-        display = _display_name(alias, lexicon[alias].name if alias in lexicon else alias)
+        display = _display_name(alias, alias)
         if display:
             items.append({"name": display, "source": "web", "provider": "duckduckgo", "url": url})
     return items
