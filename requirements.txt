@@ -10,7 +10,7 @@ PyMuPDF
 pyarrow
 pytest
 python-dotenv
-duckduckgo-search
+ddgs
 python-multipart
 requests>=2.32.3
 reportlab

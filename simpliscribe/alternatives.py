@@ -33,7 +33,7 @@ from .inference import (
 logger = logging.getLogger(__name__)
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
 
     DDGS_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
@@ -49,6 +49,7 @@ _SCAN_STOP = {
     "medicines", "medication", "medications", "drug", "drugs", "uses", "use", "used",
     "side", "effects", "effect", "substitute", "substitutes", "alternative",
     "alternatives", "price", "prices", "review", "reviews", "buy", "online",
+    "free", "otc", "cod", "pharmacy", "shop", "store", "offer", "delivery", "mg",
 }
 
 
