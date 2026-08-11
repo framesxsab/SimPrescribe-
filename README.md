@@ -64,6 +64,34 @@ The first local request can take a few minutes because model weights may need to
 - `INFERENCE_PROVIDER=endpoint`
   Sends OCR text to a compatible HTTP endpoint using `MODEL_API_URL` and optional `MODEL_API_KEY`.
 
+### Alternative medicine reference candidates (opt-in)
+
+When the local datasets provide no substitutes for a medicine, SimpliScribe can
+surface alternative reference candidates from the configured model's knowledge
+and, failing that, a DuckDuckGo web search. This phase is **off by default**
+(fail-closed) because it sends data outside the box:
+
+```env
+ALTERNATIVES_ENABLED=true
+ALTERNATIVES_PROVIDER=auto      # auto = model first, then DuckDuckGo; also: model, web, duckduckgo
+ALTERNATIVES_TIMEOUT_SECONDS=15
+ALTERNATIVES_CACHE_TTL_SECONDS=86400
+ALTERNATIVES_MAX_CANDIDATES=5
+```
+
+Governance and safety:
+
+- Only the canonical medicine name is ever sent to the model or web tier. Patient
+  names, doctor names, and raw OCR text never leave the server through this path.
+- Candidates are validated against the bundled local datasets before display, so a
+  hallucinated or non-existent drug name cannot be surfaced. The India dataset is
+  brand-centric, so generic names that do not appear in it (for example bare
+  "Ibuprofen" or "Amoxicillin") are filtered out even when a model returns them.
+- Results are labelled "web-sourced reference candidates", never recommendations;
+  they force `requires_review` and carry source links where available.
+- Lookups are TTL-cached, capped per analysis, bounded by a timeout, and any error
+  fails open to an empty list so the extraction pipeline never breaks.
+
 ## Local development
 
 ```bash
