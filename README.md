@@ -50,6 +50,11 @@ LOCAL_MODEL_TEMPERATURE=0.1
 LOCAL_MODEL_MAX_NEW_TOKENS=256
 ```
 
+Set `MODEL_SERVER_API_KEY=<shared-secret>` on the model server and the matching
+`MODEL_API_KEY=<shared-secret>` on the main app to authenticate `/extract` calls
+(optional but recommended before exposing the model server beyond 127.0.0.1).
+`MODEL_SERVER_MAX_INPUT_CHARS` caps the accepted input and prompt length.
+
 The default local model is intentionally small enough to be more realistic on consumer hardware. If you have a stronger GPU, you can raise `LOCAL_MODEL_ID` to a larger open model.
 
 For a 6 GB GPU, `Qwen/Qwen2.5-1.5B-Instruct` is the recommended default starting point before trying larger models.
@@ -236,6 +241,10 @@ SESSION_MAX_AGE_SECONDS=28800
 SESSION_HTTPS_ONLY=true
 INFERENCE_PROVIDER=fallback
 REQUEST_TIMEOUT_SECONDS=60
+# Rate limiting keys on the first X-Forwarded-For hop instead of the proxy IP.
+# Enable ONLY behind a trusted proxy that strips inbound X-Forwarded-For
+# (otherwise the header is spoofable and the rate limit can be bypassed).
+TRUST_PROXY_HEADERS=false
 ```
 
 For managed identity, replace bootstrap credentials with these deployment secrets:
