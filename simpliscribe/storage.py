@@ -29,7 +29,10 @@ audit_events = Table(
 )
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
-metadata.create_all(engine)
+
+
+def ensure_schema() -> None:
+    metadata.create_all(engine)
 
 
 def _now() -> datetime:

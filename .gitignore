@@ -16,3 +16,4 @@ data/analysis_history.json
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/benchmark_runs/

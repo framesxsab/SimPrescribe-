@@ -11,11 +11,12 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
 from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, oidc_authorization_url, owner_id, verify_csrf
-from .storage import append_audit_event, load_audit_events, load_history
+from .storage import append_audit_event, ensure_schema, load_audit_events, load_history
 from .web import analyze, download_report, history_payload, render_dashboard, render_details, render_history, review_analysis
 
 settings.validate_runtime()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+ensure_schema()
 load_history()
 
 app = FastAPI(title=f"{settings.app_name} API")

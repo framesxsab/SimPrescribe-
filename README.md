@@ -251,7 +251,22 @@ OIDC_REVIEWER_SUBJECTS=<comma-separated-provider-subject-ids>
 
 Production behavior includes signed HTTP-only cookies, CSRF validation, explicit upload consent, automatic analysis expiry, redacted audit events, protected history/details/reports/review APIs, analysis concurrency limits, CSP/HSTS headers, and a non-root container liveness check. OIDC users map to admin/reviewer/auditor roles; unmapped users are read-only auditors.
 
-The configured administrator is a local bootstrap account. Use OIDC before onboarding multiple reviewers. Database creation currently uses SQLAlchemy metadata initialization; adopt managed migrations before independently evolving multiple deployed versions.
+The configured administrator is a local bootstrap account. Use OIDC before onboarding multiple reviewers. Apply schema changes through the managed Alembic migrations below, not ad-hoc DDL, before independently evolving multiple deployed versions.
+
+### Database migrations (Alembic)
+
+Schema changes are managed with Alembic. Run the migration step before starting a new deployment; it is idempotent against an empty or up-to-date database.
+
+```bash
+# Upgrade to the latest schema (uses the same DATABASE_URL as the app)
+alembic upgrade head
+
+# Inspect the current revision
+alembic current
+```
+
+The `simpliscribe.storage` bootstrap still auto-creates the base tables on first app start (`ensure_schema()`), so local development and the test suite keep working without a manual step. In production, run `alembic upgrade head` as part of the release and evolve the schema by adding a new revision (`alembic revision --autogenerate -m "describe change"`) rather than editing existing ones.
+
 
 The review screen supports correction, confirmation, unreadable rejection, and sign-out for shared workstations. Original uploads are removed after processing, so reviewers must compare against their own source document during the active workflow. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing. Configure request-size limits at the ingress/proxy as well as `MAX_UPLOAD_MB`; multipart bodies reach the server before application validation.
 
