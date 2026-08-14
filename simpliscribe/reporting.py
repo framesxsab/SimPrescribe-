@@ -320,8 +320,8 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
             ("Medication note", med.get("insight")),
             ("Common uses", ", ".join(safe_list(med.get("uses")))),
             ("Side effects", ", ".join(safe_list(med.get("side_effects"))[:8])),
-            ("Reference candidates - not substitutes", ", ".join(safe_list(med.get("substitutes"))[:6])),
-            ("Web-sourced reference candidates - not substitutes", ", ".join(str(item.get("name", "")) for item in med.get("web_alternatives", []) if isinstance(item, dict))),
+            ("If unavailable - local dataset (not a switch instruction)", ", ".join(safe_list(med.get("substitutes"))[:6])),
+            ("If unavailable - web/model (not a switch instruction)", ", ".join(str(item.get("name", "")) for item in med.get("web_alternatives", []) if isinstance(item, dict))),
             ("Reference classes", "; ".join(item for item in (med.get("therapeutic_class"), med.get("chemical_class"), med.get("action_class")) if isinstance(item, str) and item.strip())),
         ):
             if isinstance(value, str) and value.strip():

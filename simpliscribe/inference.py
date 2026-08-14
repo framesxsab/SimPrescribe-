@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -11,6 +12,9 @@ import httpx
 from huggingface_hub import InferenceClient
 
 from .config import settings
+from .schemas import build_pipeline_metadata, coerce_extraction_result, empty_extraction_result
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_INSIGHT = "Use this medication exactly as prescribed and confirm unclear instructions with your clinician."
 
@@ -218,7 +222,7 @@ def merge_entries(existing: MedicineEntry | None, incoming: MedicineEntry) -> Me
 
 
 @lru_cache(maxsize=1)
-def load_medicine_lexicon() -> dict[str, MedicineEntry]:
+def _load_medicine_lexicon() -> dict[str, MedicineEntry]:
     alias_to_key: dict[str, str] = {}
     entries: dict[str, MedicineEntry] = {}
 
@@ -299,6 +303,14 @@ def load_medicine_lexicon() -> dict[str, MedicineEntry]:
             add_alias(clean_value(row.get(substitute_key)), key)
 
     return {alias: entries[key] for alias, key in alias_to_key.items() if key in entries}
+
+
+def load_medicine_lexicon() -> dict[str, MedicineEntry]:
+    try:
+        return _load_medicine_lexicon()
+    except Exception:
+        logger.exception("Medicine lexicon failed to load; dataset matching will be skipped.")
+        return {}
 
 
 @lru_cache(maxsize=1)
@@ -1030,59 +1042,100 @@ def add_pipeline_metadata(
     requested_provider: str,
     used_provider: str,
     warnings: list[str] | None = None,
+    degraded: bool = False,
+    error_code: str | None = None,
 ) -> dict[str, Any]:
-    result["pipeline"] = {
-        "requested_provider": requested_provider,
-        "used_provider": used_provider,
-        "warnings": warnings or [],
-        "human_review_required": True,
-    }
-    return result
+    payload = coerce_extraction_result(result)
+    payload["pipeline"] = build_pipeline_metadata(
+        requested_provider=requested_provider,
+        used_provider=used_provider,
+        warnings=warnings,
+        degraded=degraded,
+        error_code=error_code,
+    )
+    return payload
+
+
+def _heuristic_result(
+    raw_text: str,
+    *,
+    requested_provider: str,
+    warnings: list[str],
+    error_code: str | None = None,
+) -> dict[str, Any]:
+    try:
+        extracted = fallback_extract(raw_text)
+        degraded = requested_provider != "fallback" or bool(error_code)
+        return add_pipeline_metadata(
+            extracted,
+            requested_provider=requested_provider,
+            used_provider="fallback",
+            warnings=warnings,
+            degraded=degraded,
+            error_code=error_code,
+        )
+    except Exception:
+        logger.exception("Heuristic extraction failed; returning an empty review payload.")
+        next_warnings = list(warnings) + ["Rule-based extraction failed; every field requires manual review."]
+        return add_pipeline_metadata(
+            empty_extraction_result(),
+            requested_provider=requested_provider,
+            used_provider="fallback",
+            warnings=next_warnings,
+            degraded=True,
+            error_code=error_code or "HEURISTIC_FAILED",
+        )
 
 
 def structure_medications(raw_text: str) -> dict[str, Any]:
-    import logging
-    logger = logging.getLogger(__name__)
-
     if not raw_text.strip():
         raise ValueError("No readable text was extracted from the uploaded document.")
 
     provider = settings.inference_provider.strip().lower()
+    if provider not in {"huggingface", "endpoint", "fallback"}:
+        logger.warning("Unsupported inference provider configured; using the heuristic parser.")
+        return _heuristic_result(
+            raw_text,
+            requested_provider=provider or "unknown",
+            warnings=["The configured inference provider is unsupported; rule-based extraction was used."],
+            error_code="UNSUPPORTED_PROVIDER",
+        )
 
-    # Always try HuggingFace first if token is available, fall back on any error
     if provider == "huggingface":
         if settings.hf_token:
             try:
+                parsed = call_huggingface(raw_text)
+                medications = parsed.get("medications")
+                if not isinstance(medications, list):
+                    raise ValueError("The model returned an invalid medications payload.")
                 return add_pipeline_metadata(
-                    call_huggingface(raw_text), requested_provider=provider, used_provider="huggingface"
+                    parsed, requested_provider=provider, used_provider="huggingface"
                 )
             except Exception:
                 logger.exception("HuggingFace inference failed; using the heuristic parser.")
         else:
             logger.warning("No HF token set, using heuristic fallback parser.")
-        return add_pipeline_metadata(
-            fallback_extract(raw_text),
+        return _heuristic_result(
+            raw_text,
             requested_provider=provider,
-            used_provider="fallback",
             warnings=["The configured model was unavailable; rule-based extraction was used."],
         )
 
     if provider == "endpoint":
         try:
+            parsed = call_http_endpoint(raw_text)
+            medications = parsed.get("medications")
+            if not isinstance(medications, list):
+                raise ValueError("The endpoint returned an invalid medications payload.")
             return add_pipeline_metadata(
-                call_http_endpoint(raw_text), requested_provider=provider, used_provider="endpoint"
+                parsed, requested_provider=provider, used_provider="endpoint"
             )
-        except Exception as exc:
-            logger.warning("Endpoint inference failed, falling back: %s", exc)
-            return add_pipeline_metadata(
-                fallback_extract(raw_text),
+        except Exception:
+            logger.exception("Endpoint inference failed; using the heuristic parser.")
+            return _heuristic_result(
+                raw_text,
                 requested_provider=provider,
-                used_provider="fallback",
                 warnings=["The configured model endpoint was unavailable; rule-based extraction was used."],
             )
 
-    if provider == "fallback":
-        return add_pipeline_metadata(
-            fallback_extract(raw_text), requested_provider=provider, used_provider="fallback"
-        )
-    raise ValueError(f"Unsupported inference provider: {settings.inference_provider}")
+    return _heuristic_result(raw_text, requested_provider=provider, warnings=[])

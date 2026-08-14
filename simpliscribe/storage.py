@@ -1,10 +1,13 @@
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Column, DateTime, MetaData, String, Table, Text, create_engine, delete, insert, select, update
+from sqlalchemy import Column, DateTime, MetaData, String, Table, Text, create_engine, delete, insert, select, text, update
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 
 metadata = MetaData()
@@ -33,6 +36,16 @@ engine = create_engine(settings.database_url, pool_pre_ping=True)
 
 def ensure_schema() -> None:
     metadata.create_all(engine)
+
+
+def ping_database() -> bool:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        logger.exception("Database liveness check failed.")
+        return False
 
 
 def _now() -> datetime:
@@ -79,6 +92,16 @@ def append_history(record: dict[str, Any], limit: int = 25, owner_id: str = "loc
         ).scalars().all()
         if stale_ids:
             connection.execute(delete(analyses).where(analyses.c.id.in_(stale_ids)))
+
+
+def try_append_history(record: dict[str, Any], limit: int = 25, owner_id: str = "local", attempts: int = 2) -> bool:
+    for _ in range(max(attempts, 1)):
+        try:
+            append_history(record, limit=limit, owner_id=owner_id)
+            return True
+        except Exception:
+            logger.exception("Failed to persist analysis history.")
+    return False
 
 
 def get_analysis_record(analysis_id: str, owner_id: str = "local") -> dict[str, Any] | None:

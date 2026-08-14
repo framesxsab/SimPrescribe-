@@ -27,7 +27,14 @@ jobs:
             git diff --check "$BASE_SHA...$HEAD_SHA"
           fi
       - run: pip install -r requirements.txt
+      - name: Check ASGI entrypoint
+        run: python -c "from app import app; assert app.title"
       - run: pytest -q
+      - name: Verify Alembic migrations
+        env:
+          APP_ENV: development
+          DATABASE_URL: sqlite:///data/ci-alembic.db
+        run: alembic upgrade head
       - name: Run synthetic golden quality gate
         env:
           INFERENCE_PROVIDER: fallback

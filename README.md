@@ -11,7 +11,7 @@ SimpliScribe is a FastAPI application that simplifies prescription reading by ex
 
 ## Safety and intended use
 
-SimpliScribe is an open-source **review aid**, not a prescribing, diagnosis, dispensing, or autonomous clinical decision system. Every medicine name, strength, route, frequency, duration, interaction, and dataset reference candidate must be checked against the original prescription by a qualified clinician or pharmacist. The committed golden gate has eight synthetic cases and is a regression check, not evidence of clinical accuracy.
+SimpliScribe is an open-source **review aid**, not a prescribing, diagnosis, dispensing, or autonomous clinical decision system. Every medicine name, strength, route, frequency, duration, interaction, and dataset reference candidate must be checked against the original prescription by a qualified clinician or pharmacist. The committed golden gate has ten synthetic cases and is a regression check, not evidence of clinical accuracy.
 
 The application preserves OCR line boundaries, exposes OCR confidence and provider provenance, marks uncertain fields for review, validates actual file content, deletes uploads after processing, and labels dataset alternatives as reference candidates rather than recommendations.
 
@@ -69,12 +69,11 @@ The first local request can take a few minutes because model weights may need to
 - `INFERENCE_PROVIDER=endpoint`
   Sends OCR text to a compatible HTTP endpoint using `MODEL_API_URL` and optional `MODEL_API_KEY`.
 
-### Alternative medicine reference candidates (opt-in)
+### Alternative medicine reference candidates
 
-When the local datasets provide no substitutes for a medicine, SimpliScribe can
-surface alternative reference candidates from the configured model's knowledge
-and, failing that, a DuckDuckGo web search. This phase is **off by default**
-(fail-closed) because it sends data outside the box:
+When a listed medicine may be unavailable, SimpliScribe first looks in the **bundled trained datasets**: CSV substitute columns and other brands that share the same composition. That local lookup does not send data off the machine.
+
+If the local list is empty, an optional web/model phase can add more **reference candidates** from the configured model's knowledge and, failing that, a DuckDuckGo web search. This phase is **off by default** (fail-closed) because it sends data outside the box:
 
 ```env
 ALTERNATIVES_ENABLED=true
@@ -92,8 +91,10 @@ Governance and safety:
   hallucinated or non-existent drug name cannot be surfaced. The India dataset is
   brand-centric, so generic names that do not appear in it (for example bare
   "Ibuprofen" or "Amoxicillin") are filtered out even when a model returns them.
-- Results are labelled "web-sourced reference candidates", never recommendations;
-  they force `requires_review` and carry source links where available.
+- On-screen and PDF reports label local hits as "If this medicine is unavailable
+  (local dataset)" and off-box hits as "If this medicine is unavailable (web/model)".
+  They are never recommendations; they force `requires_review` and carry source
+  links where available.
 - Lookups are TTL-cached, capped per analysis, bounded by a timeout, and any error
   fails open to an empty list so the extraction pipeline never breaks.
 
@@ -125,6 +126,17 @@ Open `http://127.0.0.1:8000`.
 ```bash
 pytest
 ```
+
+CI (`.github/workflows/quality.yml`) also checks that `uvicorn app:app` can import the ASGI app, applies Alembic migrations to a throwaway SQLite database, and runs the synthetic golden gate below.
+
+## Pipeline fallbacks and health
+
+Internal failures should still return a complete analysis shape rather than a partial unlabeled payload:
+
+- Hugging Face / HTTP endpoint errors fall back to the rule-based parser, with `pipeline.used_provider`, `pipeline.warnings`, and `human_review_required`.
+- If the heuristic parser or lexicon also fails, the API still returns `N/A` headers and `medications: []` plus `pipeline.degraded` and an `error_code`.
+- Unreadable scans stay `422 UNUSABLE_PRESCRIPTION`. Storage or PDF failures return `503` with `STORAGE_FAILED` or `REPORT_UNAVAILABLE`.
+- `/api/live` is a cheap process check for the container HEALTHCHECK. `/api/health` adds `database_ready` (`SELECT 1`) and reports `degraded` if datasets, the inference provider, or the database are not ready. Logs use `error_code` / `analysis_id` / provider and must not include raw OCR or patient names.
 
 ## Benchmarking
 
@@ -185,7 +197,7 @@ Recommended workflow:
 
 ### Versioned golden regression set
 
-The committed `data/golden_cases.v1.json` file uses schema version `1.0` and covers clean, multi-medication, timing, missing-field, false-positive, and unreadable synthetic OCR scenarios. It is deliberately labelled synthetic and must not be presented as clinical validation.
+The committed `data/golden_cases.v1.json` file uses schema version `1.0` and covers clean, multi-medication, timing, missing-field, look-alike, false-positive, and unreadable synthetic OCR scenarios. It is deliberately labelled synthetic and must not be presented as clinical validation.
 
 Run the same quality gate used by CI:
 
@@ -219,6 +231,8 @@ Requirements reviewed from supplied course material were distilled without copyi
 2. **Final-report integrity:** each review preserves the prior medication and review state as a numbered version, rejects stale concurrent updates, emits an audit event, and exposes owner-scoped audit retrieval at `/api/audit`; use managed database migrations before independently evolving deployed versions.
 3. **Operational recovery:** the guarded [PostgreSQL recovery verifier](docs/PRODUCTION_RECOVERY.md) can verify a backup against a disposable private restore database; record the result in the approved operations system before retaining identifiable data.
 4. **Accessible report output:** PDF and on-screen reports are readable, printable, explicit about human verification, and show how many prior review states are preserved.
+5. **Unavailable-medicine reference list:** local CSV substitutes and same-composition brands are shown first; optional web/model candidates run only when that list is empty and `ALTERNATIVES_ENABLED=true`.
+6. **Degraded analysis output:** model, OCR-engine, lexicon, database, and PDF failures keep a labeled payload or a documented error code instead of a silent partial result.
 
 These are technical safeguards, not clinical validation. SimpliScribe will not add patient registration, consultation/diagnosis records, automatic treatment decisions, medicine reminders, or drug-interaction decisioning without a separately approved clinical, privacy, and governance design.
 

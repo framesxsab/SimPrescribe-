@@ -208,18 +208,25 @@ def extract_ocr_result(file_path: Path) -> OCRResult:
             temp_images = input_paths
 
         lines: list[OCRLine] = []
+        engine_failed = False
         for path in input_paths:
             with _ocr_inference_lock:
                 try:
-                    results = reader.ocr(str(path), cls=True)
-                except TypeError:
-                    results = reader.ocr(str(path))
+                    try:
+                        results = reader.ocr(str(path), cls=True)
+                    except TypeError:
+                        results = reader.ocr(str(path))
+                except Exception:
+                    engine_failed = True
+                    break
             lines.extend(_collect_paddle_lines(results))
 
         text = "\n".join(line.text for line in lines)
         scores = [line.confidence for line in lines if line.confidence is not None]
         confidence = sum(scores) / len(scores) if scores else None
         warnings: list[str] = []
+        if engine_failed:
+            warnings.append("OCR engine failed; the original prescription must be reviewed.")
         if not text.strip():
             warnings.append("No readable text was detected.")
         if confidence is None:

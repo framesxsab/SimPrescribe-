@@ -73,6 +73,24 @@
       "raw_text": "### ??? ...",
       "expected_rejection": true,
       "expected_medications": []
+    },
+    {
+      "id": "lookalike-celecoxib-capsule",
+      "label": "Look-alike NSAID brand with explicit capsule form",
+      "tags": ["synthetic", "look-alike", "safety-critical"],
+      "raw_text": "Celecoxib 200 cap bd 7 days",
+      "expected_medications": [
+        {"name": "Celecoxib", "type": "Capsule", "dosage": "200 mg", "frequency": "twice daily", "duration": "7 days"}
+      ]
+    },
+    {
+      "id": "missing-frequency-review",
+      "label": "Missing frequency must be reviewed",
+      "tags": ["synthetic", "missing-field", "review-flag"],
+      "raw_text": "Atorvastatin 10 tab for 30 days",
+      "expected_medications": [
+        {"name": "Atorvastatin", "type": "Tablet", "dosage": "10 mg", "duration": "30 days", "requires_review": true}
+      ]
     }
   ]
 }

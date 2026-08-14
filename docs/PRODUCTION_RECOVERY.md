@@ -19,3 +19,5 @@ Requirements before running:
 4. Record the date, operator, source backup identifier, restore target, and result in the approved operations system; do not put identifiable data in that record.
 
 This proves archive creation and full schema/data restore for the configured database. It does not prove application-level clinical correctness, identity-provider availability, or disaster-region recovery.
+
+Runtime liveness is separate: `/api/live` checks the process; `/api/health` includes `database_ready`. A passing health check is not a substitute for this restore drill.

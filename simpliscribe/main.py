@@ -11,7 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
 from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, oidc_authorization_url, owner_id, verify_csrf
-from .storage import append_audit_event, ensure_schema, load_audit_events, load_history
+from .storage import append_audit_event, ensure_schema, load_audit_events, load_history, ping_database
 from .web import analyze, download_report, history_payload, render_dashboard, render_details, render_history, review_analysis
 
 settings.validate_runtime()
@@ -94,9 +94,11 @@ async def health() -> dict:
     provider_ready = settings.inference_provider == "fallback" or bool(
         settings.hf_token if settings.inference_provider == "huggingface" else settings.model_api_url
     )
+    database_ready = ping_database()
     return {
-        "status": "ready" if datasets_ready and provider_ready else "degraded",
+        "status": "ready" if datasets_ready and provider_ready and database_ready else "degraded",
         "datasets_ready": datasets_ready,
+        "database_ready": database_ready,
         "configured_provider": settings.inference_provider,
         "provider_ready": provider_ready,
         "clinical_use": "human_review_required",

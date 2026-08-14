@@ -247,11 +247,20 @@ def test_candidate_names_in_text_finds_lexicon_aliases():
     assert any("moxikind cv 625 tablet" in hit for hit in hits)
 
 
-def test_attach_does_not_run_when_local_substitutes_exist(enabled, monkeypatch):
+def test_attach_does_not_run_web_when_local_substitutes_exist(enabled, monkeypatch):
+    called: list[str] = []
+
+    def should_not_run(name: str):
+        called.append(name)
+        return [{"name": "X", "source": "web", "provider": "duckduckgo", "url": ""}]
+
+    monkeypatch.setattr(alternatives, "fetch_alternatives", should_not_run)
     payload = {"name": "Augmentin 625 Duo Tablet", "substitutes": ["Penciclav 500 mg/125 mg Tablet"]}
-    monkeypatch.setattr(alternatives, "fetch_alternatives", lambda name: [{"name": "X", "source": "web", "provider": "duckduckgo", "url": ""}])
     result = attach_alternative_candidates(dict(payload))
-    assert result == payload
+    assert called == []
+    assert "Penciclav 500 mg/125 mg Tablet" in result["substitutes"]
+    assert "web_alternatives" not in result
+    assert result["requires_review"] is True
 
 
 def test_attach_sets_review_flags_without_substitutes(enabled, monkeypatch):
@@ -280,3 +289,64 @@ def test_only_medicine_name_is_sent_off_box(enabled, monkeypatch):
     assert sent["query"] == "Augmentin 625 Duo Tablet"
     assert "patient" not in sent["query"].lower()
     assert "Dr" not in sent["query"]
+
+
+def _entry(name: str, composition: str, substitutes: tuple[str, ...] = ()) -> object:
+    from simpliscribe.inference import MedicineEntry
+
+    return MedicineEntry(
+        name=name,
+        composition=composition,
+        category="General",
+        dosage_form="Tablet",
+        manufacturer="",
+        pack_size="",
+        therapeutic_class="",
+        chemical_class="",
+        action_class="",
+        substitutes=substitutes,
+        uses=(),
+        side_effects=(),
+        sources=("Test Dataset",),
+    )
+
+
+def test_dataset_reference_candidates_use_same_composition(monkeypatch):
+    from simpliscribe.inference import MedicineMatch
+
+    alpha = _entry("Alpha 650 Tablet", "Paracetamol 650 mg")
+    beta = _entry("Beta 650 Tablet", "Paracetamol 650 mg")
+    lexicon = {"alpha 650 tablet": alpha, "beta 650 tablet": beta}
+
+    monkeypatch.setattr(alternatives, "load_medicine_lexicon", lambda: lexicon)
+    monkeypatch.setattr(
+        alternatives,
+        "find_medicine_match",
+        lambda name: MedicineMatch(alpha, 1.0, "exact", "alpha 650 tablet") if "alpha" in name.lower() else None,
+    )
+    alternatives._composition_to_names.cache_clear()
+    peers = alternatives.dataset_reference_candidates("Alpha 650 Tablet")
+    assert "Beta 650 Tablet" in peers
+    assert "Alpha 650 Tablet" not in peers
+
+
+def test_attach_fills_local_peers_even_when_web_is_disabled(monkeypatch):
+    from simpliscribe.inference import MedicineMatch
+
+    listed = _entry("Listed Brand", "Ibuprofen 400 mg", substitutes=("Other Brand Tablet",))
+    monkeypatch.setattr("simpliscribe.alternatives.settings", DISABLED_SETTINGS)
+    monkeypatch.setattr(alternatives, "load_medicine_lexicon", lambda: {"listed brand": listed})
+    monkeypatch.setattr(
+        alternatives,
+        "find_medicine_match",
+        lambda name: MedicineMatch(listed, 1.0, "exact", "listed brand"),
+    )
+    monkeypatch.setattr(
+        alternatives,
+        "fetch_alternatives",
+        lambda name: (_ for _ in ()).throw(AssertionError("web lookup must not run")),
+    )
+    alternatives._composition_to_names.cache_clear()
+    result = attach_alternative_candidates({"name": "Listed Brand", "substitutes": [], "review_reasons": []})
+    assert "Other Brand Tablet" in result["substitutes"]
+    assert "web_alternatives" not in result

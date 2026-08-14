@@ -13,10 +13,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .config import settings
 from .inference import structure_medications
-from .ocr import extract_ocr_result, validate_document
+from .ocr import OCRResult, extract_ocr_result, validate_document
 from .reporting import build_pdf_report
+from .schemas import analysis_output_contract
 from .security import owner_id, public_user_context, require_edit_role, verify_csrf
-from .storage import append_audit_event, append_history, get_analysis_record, load_history, update_analysis_record
+from .storage import append_audit_event, get_analysis_record, load_history, try_append_history, update_analysis_record
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,19 @@ async def download_report(request: Request, analysis_id: str) -> Response:
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
 
-    pdf_bytes = build_pdf_report(analysis, settings.app_name)
+    try:
+        pdf_bytes = build_pdf_report(analysis, settings.app_name)
+    except Exception:
+        logger.exception("PDF report generation failed.")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "The PDF report is temporarily unavailable. Review the on-screen analysis against the original prescription.",
+                "error_code": "REPORT_UNAVAILABLE",
+                "analysis_id": analysis_id,
+            },
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
     append_audit_event(str(uuid.uuid4()), owner, "report_downloaded", analysis_id)
     safe_name = sanitize_filename(str(analysis.get("filename") or "analysis"))
     download_name = f"{Path(safe_name).stem}_report.pdf"
@@ -121,8 +134,38 @@ async def analyze(
         raise HTTPException(status_code=400, detail="Explicit processing consent is required.")
     stored_file = await save_upload(file)
     try:
-        ocr_result = await asyncio.to_thread(extract_ocr_result, stored_file)
-        parsed = await asyncio.to_thread(structure_medications, ocr_result.text)
+        try:
+            ocr_result = await asyncio.to_thread(extract_ocr_result, stored_file)
+        except Exception:
+            logger.exception("OCR engine failed.")
+            ocr_result = OCRResult(
+                "",
+                None,
+                (),
+                ("OCR engine failed; the original prescription must be reviewed.",),
+            )
+        if not str(ocr_result.text or "").strip():
+            raise ValueError("No readable text was extracted from the uploaded document.")
+        try:
+            parsed = await asyncio.to_thread(structure_medications, ocr_result.text)
+        except ValueError:
+            raise
+        except Exception:
+            logger.exception("Medication structuring failed; returning an empty review payload.")
+            parsed = {
+                "patient_name": "N/A",
+                "doctor_name": "N/A",
+                "date": "N/A",
+                "medications": [],
+                "pipeline": {
+                    "requested_provider": settings.inference_provider,
+                    "used_provider": "fallback",
+                    "warnings": ["Medication structuring failed; every field requires manual review."],
+                    "human_review_required": True,
+                    "degraded": True,
+                    "error_code": "STRUCTURING_FAILED",
+                },
+            }
         medications = parsed.get("medications", [])
         if not isinstance(medications, list):
             raise ValueError("The extraction pipeline returned an invalid medication list.")
@@ -131,7 +174,7 @@ async def analyze(
         pipeline["ocr_warnings"] = list(ocr_result.warnings)
         pipeline["human_review_required"] = True
         analysis_id = str(uuid.uuid4())
-        record = {
+        record = analysis_output_contract({
             "id": analysis_id,
             "filename": stored_file.name.split("_", 1)[1] if "_" in stored_file.name else stored_file.name,
             "created_at": utc_now_iso(),
@@ -142,8 +185,22 @@ async def analyze(
             "medications": medications,
             "pipeline": pipeline,
             "review_status": "needs_review",
-        }
-        append_history(record, owner_id=owner)
+        })
+        stored = try_append_history(record, owner_id=owner)
+        if not stored:
+            pipeline = dict(record["pipeline"])
+            pipeline["warnings"] = list(pipeline.get("warnings") or []) + [
+                "Analysis could not be saved; this result is not in history."
+            ]
+            pipeline["degraded"] = True
+            pipeline["error_code"] = "STORAGE_FAILED"
+            record["pipeline"] = pipeline
+            logger.warning("Analysis persistence failed after retry.")
+            return JSONResponse(
+                status_code=503,
+                content={"analysis_id": analysis_id, **record},
+                headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+            )
         append_audit_event(str(uuid.uuid4()), owner, "analysis_created", analysis_id, provider=pipeline.get("used_provider", "unknown"))
         return JSONResponse(
             content={"analysis_id": analysis_id, **record},

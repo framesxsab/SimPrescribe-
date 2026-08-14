@@ -1,13 +1,13 @@
-"""Alternative medicine reference candidates from the configured model and/or web search.
+"""Alternative medicine reference candidates from local datasets, then optional model/web search.
 
-Only runs when the local datasets provide no substitutes for a medicine. The
-escalation chain is: model knowledge (when a model provider is configured), then
-DuckDuckGo web search. Every candidate is validated against the local medicine
-lexicon so a hallucinated drug name can never be surfaced.
+Local trained data always runs: CSV substitute columns plus other brands that share
+the same composition. Model/web search only runs when that local list is empty and
+ALTERNATIVES_ENABLED is on. Every off-box candidate is validated against the local
+medicine lexicon so a hallucinated drug name can never be surfaced.
 
 Safety:
 - All results are reference candidates, never recommendations, and force review.
-- Disabled by default; enabling sends only the canonical medicine name off-box.
+- Web/model lookup is disabled by default; enabling sends only the canonical medicine name off-box.
 - Errors and timeouts fail open to an empty list so the pipeline never breaks.
 """
 
@@ -23,6 +23,7 @@ from huggingface_hub import InferenceClient
 
 from .config import settings
 from .inference import (
+    find_medicine_match,
     is_junk_medication,
     load_medicine_lexicon,
     normalize_llm_json,
@@ -81,6 +82,66 @@ def build_alternatives_prompt(name: str) -> str:
         "- Do not invent medicines.\n"
         f"Medicine: {name}"
     )
+
+
+@lru_cache(maxsize=1)
+def _composition_to_names() -> dict[str, tuple[str, ...]]:
+    grouped: dict[str, list[str]] = {}
+    seen: dict[str, set[str]] = {}
+    for entry in load_medicine_lexicon().values():
+        composition = normalize_text(entry.composition)
+        if len(composition) < 8:
+            continue
+        display = str(entry.name or "").strip()
+        key = normalize_text(display)
+        if not display or key in UNKNOWN_KEYS:
+            continue
+        names = grouped.setdefault(composition, [])
+        already = seen.setdefault(composition, set())
+        if key in already:
+            continue
+        already.add(key)
+        names.append(display)
+    return {composition: tuple(names) for composition, names in grouped.items()}
+
+
+def dataset_reference_candidates(medicine_name: str, existing: list[str] | None = None, limit: int | None = None) -> list[str]:
+    """CSV substitutes plus other local brands that share the same composition."""
+    cap = limit if limit is not None else settings.alternatives_max_candidates
+    query = normalize_text(medicine_name)
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        key = normalize_text(raw)
+        if not key or key in UNKNOWN_KEYS or key == query or key in seen:
+            return
+        display = title_case(raw) if raw == key else str(raw).strip()
+        if is_junk_medication(display.replace("/", " ")):
+            return
+        seen.add(key)
+        names.append(display)
+
+    for item in existing or []:
+        add(str(item))
+    if len(names) >= cap:
+        return names[:cap]
+
+    match = find_medicine_match(medicine_name)
+    entry = match.entry if match else load_medicine_lexicon().get(query)
+    if entry is None:
+        return names[:cap]
+    for item in entry.substitutes:
+        add(item)
+        if len(names) >= cap:
+            return names[:cap]
+    composition = normalize_text(entry.composition)
+    if len(composition) >= 8:
+        for peer in _composition_to_names().get(composition, ()):
+            add(peer)
+            if len(names) >= cap:
+                break
+    return names[:cap]
 
 
 @lru_cache(maxsize=1)
@@ -256,7 +317,16 @@ def fetch_alternatives(medicine_name: str) -> list[dict[str, str]]:
 
 
 def attach_alternative_candidates(payload: dict[str, Any]) -> dict[str, Any]:
-    """Attach model/web reference candidates when local substitutes are absent."""
+    """Attach local dataset peers always, then optional model/web candidates when those are absent."""
+    existing = payload.get("substitutes") if isinstance(payload.get("substitutes"), list) else []
+    local = dataset_reference_candidates(str(payload.get("name") or ""), existing)
+    if local:
+        payload["substitutes"] = local
+        payload["requires_review"] = True
+        reason = "Dataset reference candidates are not a dispensing decision; confirm availability and equivalence with a pharmacist or prescriber."
+        reasons = payload.setdefault("review_reasons", [])
+        if reason not in reasons:
+            reasons.append(reason)
     if not settings.alternatives_enabled or payload.get("substitutes"):
         return payload
     candidates = fetch_alternatives(str(payload.get("name") or ""))
@@ -264,8 +334,8 @@ def attach_alternative_candidates(payload: dict[str, Any]) -> dict[str, Any]:
         return payload
     payload["web_alternatives"] = candidates
     payload["requires_review"] = True
-    reason = "Alternative reference candidates were sourced from a model/web search and must be verified by a prescriber."
+    web_reason = "Alternative reference candidates were sourced from a model/web search and must be verified by a prescriber."
     reasons = payload.setdefault("review_reasons", [])
-    if reason not in reasons:
-        reasons.append(reason)
+    if web_reason not in reasons:
+        reasons.append(web_reason)
     return payload

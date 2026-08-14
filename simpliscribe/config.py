@@ -124,6 +124,8 @@ class Settings:
             errors.append("ALTERNATIVES_TIMEOUT_SECONDS must be at least 1")
         if self.model_server_max_input_chars < 1000:
             errors.append("MODEL_SERVER_MAX_INPUT_CHARS must be at least 1000")
+        if self.inference_provider.strip().lower() not in {"fallback", "huggingface", "endpoint"}:
+            errors.append("INFERENCE_PROVIDER must be fallback, huggingface, or endpoint")
         oidc_values = (self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret, self.oidc_redirect_uri)
         if any(oidc_values) and not all(oidc_values):
             errors.append("OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, and OIDC_REDIRECT_URI must be configured together")
