@@ -22,7 +22,13 @@
                 <p class="text-sm uppercase tracking-[0.12em] text-slate-500 font-semibold">Saved analyses</p>
                 <h1 class="text-3xl font-extrabold tracking-tight">Prescription analysis history</h1>
             </div>
-            <a href="/" class="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">New Analysis</a>
+            <div class="flex items-center gap-2">
+                <a href="/api/audit/export?format=csv" download class="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition-colors shadow-sm">
+                    <span class="material-symbols-outlined text-base">download</span>
+                    Export Audit Log (CSV)
+                </a>
+                <a href="/" class="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 transition-colors">New Analysis</a>
+            </div>
         </div>
 
         {% if analyses %}
