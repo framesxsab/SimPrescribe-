@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .config import settings
 from .metrics import generate_prometheus_metrics, get_metrics_snapshot, record_http_request
 from .retrieval import get_retriever, get_vector_cache
+from .schemas import CacheStatsResponse, HealthResponse, LiveResponse, SimilarPrescriptionsResponse
 from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, oidc_authorization_url, owner_id, require_edit_role, verify_csrf
 from .storage import append_audit_event, ensure_schema, load_audit_events, load_history, ping_database
 from .web import analyze, download_report, export_audit_csv, history_payload, render_dashboard, render_details, render_history, review_analysis
@@ -99,12 +100,12 @@ app.add_middleware(
 )
 
 
-@app.get("/api/live")
+@app.get("/api/live", response_model=LiveResponse)
 async def live() -> dict[str, str]:
     return {"status": "alive"}
 
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 async def health() -> dict:
     datasets_ready = settings.india_medicine_dataset.exists() and settings.medicine_database_dataset.exists()
     provider_ready = settings.inference_provider == "fallback" or bool(
@@ -220,14 +221,14 @@ async def review(request: Request, analysis_id: str):
     return await review_analysis(request, analysis_id, await request.json())
 
 
-@app.get("/api/retrieval/similar")
+@app.get("/api/retrieval/similar", response_model=SimilarPrescriptionsResponse)
 async def similar_prescriptions(q: str = "", limit: int = 5, min_similarity: float = 0.2) -> dict:
     retriever = get_retriever()
     results = retriever.query_similar(q, top_k=limit, min_similarity=min_similarity)
     return {"query": q, "count": len(results), "results": results}
 
 
-@app.get("/api/cache/stats")
+@app.get("/api/cache/stats", response_model=CacheStatsResponse)
 async def cache_stats() -> dict:
     return get_vector_cache().stats()
 

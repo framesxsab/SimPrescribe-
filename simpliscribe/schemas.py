@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from pydantic import BaseModel, Field
 
 HEADER_FIELDS = ("patient_name", "doctor_name", "date")
 PIPELINE_CORE_FIELDS = (
@@ -9,6 +10,57 @@ PIPELINE_CORE_FIELDS = (
     "warnings",
     "human_review_required",
 )
+
+
+class LiveResponse(BaseModel):
+    status: str = Field(default="alive", description="Service liveness state.")
+
+
+class HealthResponse(BaseModel):
+    status: str = Field(description="Service readiness state ('ready' or 'degraded').")
+    datasets_ready: bool = Field(description="Whether local medicine reference datasets are loaded.")
+    database_ready: bool = Field(description="Whether primary database ping succeeded.")
+    configured_provider: str = Field(description="Inference provider setting (huggingface/fallback/local).")
+    provider_ready: bool = Field(description="Whether the configured inference credentials/model are ready.")
+    clinical_use: str = Field(default="human_review_required", description="Clinical safety statement.")
+    authentication_required: bool = Field(description="Whether session/OIDC auth is enforced.")
+
+
+class SimilarPrescriptionItem(BaseModel):
+    id: str = Field(description="Unique identifier of matching prescription.")
+    similarity: float = Field(description="Cosine similarity score (0.0 to 1.0).")
+    raw_text: str = Field(description="Original or synthesized prescription text.")
+    medicines: list[dict[str, Any]] = Field(default_factory=list, description="Extracted medications list.")
+    source: str = Field(default="", description="Provenance dataset source.")
+    tags: list[str] = Field(default_factory=list, description="Diagnostic tags.")
+
+
+class SimilarPrescriptionsResponse(BaseModel):
+    query: str = Field(description="Query string searched.")
+    count: int = Field(description="Number of matching results returned.")
+    results: list[SimilarPrescriptionItem] = Field(description="Top-k matching prescription records.")
+
+
+class CacheStatsResponse(BaseModel):
+    in_memory_entries: int = Field(description="Active vector index items in memory.")
+    exact_cache_size: int = Field(description="Exact hash lookup cache items.")
+    session_hits: int = Field(description="Total cache hits during current server session.")
+    session_misses: int = Field(description="Total cache misses during current server session.")
+    hit_ratio: float = Field(description="Cache hit ratio (0.0 to 1.0).")
+    total_db_entries: int | None = Field(default=0, description="Total cached records in persistent DB.")
+    total_db_hits: int | None = Field(default=0, description="Historical cumulative DB cache hits.")
+
+
+class ReviewRequest(BaseModel):
+    status: str = Field(description="Review decision ('confirmed', 'corrected', 'rejected').")
+    medications: list[dict[str, Any]] | None = Field(default=None, description="Optional medication field corrections.")
+
+
+class ReviewResponse(BaseModel):
+    analysis_id: str = Field(description="Analysis UUID.")
+    review_status: str = Field(description="Updated review status.")
+    reviewed_at: str = Field(description="ISO timestamp of review.")
+    review_version: int = Field(description="Incremental review revision number.")
 
 
 def empty_extraction_result() -> dict[str, Any]:
