@@ -1,0 +1,34 @@
+name: Bug Report
+description: Report a reproducible software bug or OCR parsing failure
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for reporting an issue! Please do NOT post any real patient identification or unconsented medical images.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How can maintainers reproduce this behavior?
+      placeholder: |
+        1. Go to '/'
+        2. Upload synthetic prescription file '...'
+        3. Click 'Analyze Prescription'
+        4. See unexpected error
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment Info
+      description: OS version, Python version, Browser, Docker setup.
+      placeholder: "Windows 11 / Ubuntu 22.04, Python 3.11, Chrome 120"
+    validations:
+      required: false

@@ -10,9 +10,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
-from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, oidc_authorization_url, owner_id, verify_csrf
+from .metrics import generate_prometheus_metrics, get_metrics_snapshot, record_http_request
+from .retrieval import get_retriever, get_vector_cache
+from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, oidc_authorization_url, owner_id, require_edit_role, verify_csrf
 from .storage import append_audit_event, ensure_schema, load_audit_events, load_history, ping_database
-from .web import analyze, download_report, history_payload, render_dashboard, render_details, render_history, review_analysis
+from .web import analyze, download_report, export_audit_csv, history_payload, render_dashboard, render_details, render_history, review_analysis
 
 settings.validate_runtime()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -61,8 +63,10 @@ def _consume_bucket(buckets: dict[str, deque[float]], key: str, now: float, wind
 
 @app.middleware("http")
 async def protect_health_data_responses(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
     response = None
-    if settings.authentication_enabled and request.url.path not in {"/login", "/login/oidc", "/auth/callback", "/api/health", "/api/live"} and not request.url.path.startswith("/static/"):
+    if settings.authentication_enabled and request.url.path not in {"/login", "/login/oidc", "/auth/callback", "/api/health", "/api/live", "/api/metrics"} and not request.url.path.startswith("/static/"):
         if current_user(request) is None:
             if request.url.path.startswith("/api/"):
                 response = JSONResponse(status_code=401, content={"detail": "Authentication required."})
@@ -70,6 +74,8 @@ async def protect_health_data_responses(request: Request, call_next):
                 response = RedirectResponse("/login", status_code=303)
     if response is None:
         response = await call_next(request)
+    response.headers.setdefault("X-Request-ID", request_id)
+    record_http_request(request.method, response.status_code)
     if not request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "no-store")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -212,3 +218,50 @@ async def get_report(request: Request, analysis_id: str):
 @app.patch("/api/analyses/{analysis_id}/review")
 async def review(request: Request, analysis_id: str):
     return await review_analysis(request, analysis_id, await request.json())
+
+
+@app.get("/api/retrieval/similar")
+async def similar_prescriptions(q: str = "", limit: int = 5, min_similarity: float = 0.2) -> dict:
+    retriever = get_retriever()
+    results = retriever.query_similar(q, top_k=limit, min_similarity=min_similarity)
+    return {"query": q, "count": len(results), "results": results}
+
+
+@app.get("/api/cache/stats")
+async def cache_stats() -> dict:
+    return get_vector_cache().stats()
+
+
+@app.post("/api/cache/clear")
+async def cache_clear(request: Request) -> dict:
+    require_edit_role(request)
+    get_vector_cache().clear()
+    return {"status": "cleared"}
+
+
+@app.get("/api/metrics")
+async def metrics(request: Request, format: str = ""):
+    accept = request.headers.get("accept", "")
+    if format == "prometheus" or "text/plain" in accept:
+        from fastapi.responses import Response
+        return Response(content=generate_prometheus_metrics(), media_type="text/plain; version=0.0.4")
+    return get_metrics_snapshot()
+
+
+@app.get("/api/audit/export")
+async def export_audit(request: Request, format: str = "json"):
+    from fastapi.responses import Response
+    owner = owner_id(request)
+    events = load_audit_events(owner, limit=500)
+    if format.lower() == "csv":
+        csv_data = export_audit_csv(events)
+        headers = {
+            "Content-Disposition": 'attachment; filename="simpliscribe_audit_events.csv"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        }
+        return Response(content=csv_data, media_type="text/csv", headers=headers)
+    return {"owner_id": owner, "count": len(events), "events": events}
+
+
+

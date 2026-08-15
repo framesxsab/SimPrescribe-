@@ -1,0 +1,40 @@
+name: Clinician Golden Case Proposal
+description: Propose a new de-identified benchmark case for regression validation
+labels: ["golden-dataset", "clinical-safety"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Golden cases help prevent OCR/LLM regression on challenging handwritten notations, look-alike drugs, and critical dosage timings.
+        **CRITICAL**: Do NOT submit images or text with any personally identifiable information (PHI).
+  - type: input
+    id: case_id
+    attributes:
+      label: Case Identifier
+      placeholder: "e.g. lookalike-prednisolone-prednisone"
+    validations:
+      required: true
+  - type: textarea
+    id: raw_text
+    attributes:
+      label: De-Identified Raw OCR Text
+      placeholder: "Prednisolone 5mg tab od 7 days"
+    validations:
+      required: true
+  - type: textarea
+    id: expected_medications
+    attributes:
+      label: Expected Ground Truth Medications (JSON format)
+      placeholder: |
+        [
+          {"name": "Prednisolone", "type": "Tablet", "dosage": "5 mg", "frequency": "once daily", "duration": "7 days"}
+        ]
+    validations:
+      required: true
+  - type: textarea
+    id: clinical_rationale
+    attributes:
+      label: Clinical Rationale / Edge Case Description
+      description: Why is this case important for safety or regression benchmarking?
+    validations:
+      required: true

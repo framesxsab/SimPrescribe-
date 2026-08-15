@@ -1,0 +1,25 @@
+name: Feature Request
+description: Propose a new feature, workflow enhancement, or integration for SimpliScribe
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement / Clinical Need
+      description: Is your feature request related to a problem or clinical workflow constraint?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution / Feature
+      description: A clear and concise description of what you want to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you've considered.
+    validations:
+      required: false

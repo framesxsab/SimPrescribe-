@@ -22,3 +22,8 @@ data/coverage.xml
 .coverage
 coverage.xml
 htmlcov/
+.cursor/
+.omo/
+*.pdf
+uv.lock
+

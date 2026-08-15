@@ -15,6 +15,7 @@ from .config import settings
 from .inference import structure_medications
 from .ocr import OCRResult, extract_ocr_result, validate_document
 from .reporting import build_pdf_report
+from .retrieval import get_vector_cache
 from .schemas import analysis_output_contract
 from .security import owner_id, public_user_context, require_edit_role, verify_csrf
 from .storage import append_audit_event, get_analysis_record, load_history, try_append_history, update_analysis_record
@@ -152,26 +153,37 @@ async def analyze(
             )
         if not str(ocr_result.text or "").strip():
             raise ValueError("No readable text was extracted from the uploaded document.")
-        try:
-            parsed = await asyncio.to_thread(structure_medications, ocr_result.text)
-        except ValueError:
-            raise
-        except Exception:
-            logger.exception("Medication structuring failed; returning an empty review payload.")
-            parsed = {
-                "patient_name": "N/A",
-                "doctor_name": "N/A",
-                "date": "N/A",
-                "medications": [],
-                "pipeline": {
-                    "requested_provider": settings.inference_provider,
-                    "used_provider": "fallback",
-                    "warnings": ["Medication structuring failed; every field requires manual review."],
-                    "human_review_required": True,
-                    "degraded": True,
-                    "error_code": "STRUCTURING_FAILED",
-                },
-            }
+        cache_hit = get_vector_cache().lookup(ocr_result.text, threshold=0.98)
+        if cache_hit is not None:
+            cached_payload, similarity = cache_hit
+            parsed = deepcopy(cached_payload)
+            pipeline = dict(parsed.get("pipeline") or {})
+            pipeline["cached_vector_match"] = True
+            pipeline["cached_vector_similarity"] = round(similarity, 4)
+            parsed["pipeline"] = pipeline
+        else:
+            try:
+                parsed = await asyncio.to_thread(structure_medications, ocr_result.text)
+                if not parsed.get("pipeline", {}).get("degraded", False):
+                    get_vector_cache().store(ocr_result.text, parsed)
+            except ValueError:
+                raise
+            except Exception:
+                logger.exception("Medication structuring failed; returning an empty review payload.")
+                parsed = {
+                    "patient_name": "N/A",
+                    "doctor_name": "N/A",
+                    "date": "N/A",
+                    "medications": [],
+                    "pipeline": {
+                        "requested_provider": settings.inference_provider,
+                        "used_provider": "fallback",
+                        "warnings": ["Medication structuring failed; every field requires manual review."],
+                        "human_review_required": True,
+                        "degraded": True,
+                        "error_code": "STRUCTURING_FAILED",
+                    },
+                }
         medications = parsed.get("medications", [])
         if not isinstance(medications, list):
             raise ValueError("The extraction pipeline returned an invalid medication list.")
@@ -280,3 +292,23 @@ async def review_analysis(request: Request, analysis_id: str, payload: dict[str,
         raise HTTPException(status_code=409, detail="Analysis was updated by another reviewer. Reload and try again.")
     append_audit_event(str(uuid.uuid4()), owner, "analysis_reviewed", analysis_id, status=status, review_version=len(review_versions))
     return {"analysis_id": analysis_id, "review_status": status, "reviewed_at": analysis["reviewed_at"], "review_version": len(review_versions)}
+
+
+def export_audit_csv(events: list[dict[str, Any]]) -> str:
+    import csv
+    import io
+    import json
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id", "created_at", "event_type", "analysis_id", "metadata"])
+    for event in events:
+        writer.writerow([
+            event.get("id", ""),
+            event.get("created_at", ""),
+            event.get("event_type", ""),
+            event.get("analysis_id", "") or "",
+            json.dumps(event.get("metadata", {})),
+        ])
+    return output.getvalue()
+

@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Column, DateTime, MetaData, String, Table, Text, create_engine, delete, insert, select, text, update
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, create_engine, delete, insert, select, text, update
 
 from .config import settings
 
@@ -29,6 +29,18 @@ audit_events = Table(
     Column("event_type", String(64), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("metadata_json", Text, nullable=False, default="{}"),
+)
+vector_cache_table = Table(
+    "vector_cache",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("text_hash", String(64), nullable=False, index=True),
+    Column("raw_text", Text, nullable=False),
+    Column("vector_json", Text, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("hit_count", Integer, nullable=False, default=0),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("last_accessed_at", DateTime(timezone=True), nullable=False),
 )
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -154,3 +166,89 @@ def load_audit_events(owner_id: str = "local", limit: int = 100) -> list[dict[st
             }
             for row in connection.execute(query)
         ]
+
+
+def save_vector_cache_entry(
+    entry_id: str,
+    text_hash: str,
+    raw_text: str,
+    vector_json: str,
+    payload_json: str,
+) -> None:
+    now = _now()
+    with engine.begin() as connection:
+        # Check if already exists by text_hash
+        existing = connection.execute(
+            select(vector_cache_table.c.id).where(vector_cache_table.c.text_hash == text_hash)
+        ).scalar_one_or_none()
+        if existing:
+            connection.execute(
+                update(vector_cache_table)
+                .where(vector_cache_table.c.id == existing)
+                .values(
+                    raw_text=raw_text,
+                    vector_json=vector_json,
+                    payload_json=payload_json,
+                    last_accessed_at=now,
+                )
+            )
+        else:
+            connection.execute(
+                insert(vector_cache_table).values(
+                    id=entry_id,
+                    text_hash=text_hash,
+                    raw_text=raw_text,
+                    vector_json=vector_json,
+                    payload_json=payload_json,
+                    hit_count=0,
+                    created_at=now,
+                    last_accessed_at=now,
+                )
+            )
+
+
+def load_vector_cache_entries(limit: int = 1000) -> list[dict[str, Any]]:
+    query = (
+        select(vector_cache_table)
+        .order_by(vector_cache_table.c.hit_count.desc(), vector_cache_table.c.last_accessed_at.desc())
+        .limit(limit)
+    )
+    with engine.connect() as connection:
+        return [
+            {
+                "id": row.id,
+                "text_hash": row.text_hash,
+                "raw_text": row.raw_text,
+                "vector": json.loads(row.vector_json),
+                "payload": json.loads(row.payload_json),
+                "hit_count": row.hit_count,
+            }
+            for row in connection.execute(query)
+        ]
+
+
+def increment_vector_cache_hit(entry_id: str) -> None:
+    now = _now()
+    with engine.begin() as connection:
+        connection.execute(
+            update(vector_cache_table)
+            .where(vector_cache_table.c.id == entry_id)
+            .values(
+                hit_count=vector_cache_table.c.hit_count + 1,
+                last_accessed_at=now,
+            )
+        )
+
+
+def clear_vector_cache_db() -> int:
+    with engine.begin() as connection:
+        res = connection.execute(delete(vector_cache_table))
+        return int(res.rowcount or 0)
+
+
+def get_vector_cache_stats() -> dict[str, Any]:
+    with engine.connect() as connection:
+        count = connection.execute(select(text("count(*)")).select_from(vector_cache_table)).scalar() or 0
+        total_hits = connection.execute(select(text("coalesce(sum(hit_count), 0)")).select_from(vector_cache_table)).scalar() or 0
+        return {"total_db_entries": int(count), "total_db_hits": int(total_hits)}
+

@@ -1,0 +1,69 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: simpliscribe-web
+    restart: unless-stopped
+    environment:
+      - APP_NAME=SimpliScribe
+      - APP_ENV=production
+      - DATABASE_URL=postgresql+psycopg://simpliscribe:simpliscribe_secret@db:5432/simpliscribe
+      - SESSION_SECRET=${SESSION_SECRET:-production-change-this-session-secret-to-a-secure-random-key}
+      - AUTH_REQUIRED=true
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@simpliscribe.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin_change_me_immediately}
+      - INFERENCE_PROVIDER=fallback
+      - MAX_UPLOAD_MB=10
+      - REQUEST_TIMEOUT_SECONDS=60
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - simpliscribe_uploads:/app/uploads
+      - simpliscribe_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/live').read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    expose:
+      - "8000"
+
+  db:
+    image: postgres:16-alpine
+    container_name: simpliscribe-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: simpliscribe
+      POSTGRES_USER: simpliscribe
+      POSTGRES_PASSWORD: simpliscribe_secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U simpliscribe -d simpliscribe"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    expose:
+      - "5432"
+
+  nginx:
+    image: nginx:alpine
+    container_name: simpliscribe-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./static:/usr/share/nginx/html/static:ro
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  simpliscribe_uploads:
+  simpliscribe_data:
+  postgres_data:
