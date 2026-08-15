@@ -127,7 +127,7 @@ Open `http://127.0.0.1:8000`.
 pytest
 ```
 
-CI (`.github/workflows/quality.yml`) also checks that `uvicorn app:app` can import the ASGI app, applies Alembic migrations to a throwaway SQLite database, and runs the synthetic golden gate below.
+CI (`.github/workflows/quality.yml`) also checks that `uvicorn app:app` can import the ASGI app, applies Alembic migrations to a throwaway SQLite database, runs a ruff check baseline (no autoformat), publishes a pytest coverage report artifact, builds the Docker image without preloading OCR models, restores a disposable PostgreSQL database in CI, and runs the synthetic golden gate below.
 
 ## Pipeline fallbacks and health
 
@@ -197,7 +197,18 @@ Recommended workflow:
 
 ### Versioned golden regression set
 
-The committed `data/golden_cases.v1.json` file uses schema version `1.0` and covers clean, multi-medication, timing, missing-field, look-alike, false-positive, and unreadable synthetic OCR scenarios. It is deliberately labelled synthetic and must not be presented as clinical validation.
+The committed `data/golden_cases.v1.json` file uses schema version `1.0` and covers clean, multi-medication, timing, missing-field, look-alike, false-positive, and unreadable synthetic OCR scenarios. It is deliberately labelled synthetic and must not be presented as clinical validation. Do not replace this file.
+
+Clinician-adjudicated cases, when they exist, belong only in `data/golden_cases.clinician.v1.json` (currently an empty schema `1.0` placeholder). Append cases there; never copy over `golden_cases.v1.json`. Optional local merge:
+
+```bash
+INFERENCE_PROVIDER=fallback python -m simpliscribe.benchmark \
+  --cases data/golden_cases.v1.json \
+  --extra-cases data/golden_cases.clinician.v1.json \
+  --output data/benchmark_runs/latest.json \
+  --min-f1 0.85 \
+  --max-hallucination-rate 0.10
+```
 
 Run the same quality gate used by CI:
 
@@ -213,15 +224,15 @@ On PowerShell, set `$env:INFERENCE_PROVIDER="fallback"` before running the Pytho
 
 Golden files accept a top-level object containing `schema_version`, provenance metadata, and `cases`. Each case requires a unique `id`, an `expected_medications` array, and either `raw_text` or a relative `file_path`. Optional `tags`, per-medication `requires_review`, and case-level `expected_rejection` fields enable subgroup and safety evaluation. Reviewed image fixtures should be de-identified and committed only when consent and dataset terms allow it.
 
-For a clinically meaningful evaluation, replace the samples with de-identified, consented prescriptions adjudicated by qualified reviewers. Report medication-name precision/recall, exact strength/frequency/duration accuracy, unreadable-scan rejection, subgroup performance, and false confident matches. Do not promote a model based on one aggregate score.
+For a clinically meaningful evaluation, add de-identified, consented prescriptions adjudicated by qualified reviewers to `data/golden_cases.clinician.v1.json` without replacing the synthetic set. Report medication-name precision/recall, exact strength/frequency/duration accuracy, unreadable-scan rejection, subgroup performance, and false confident matches. Do not promote a model based on one aggregate score.
 
 ## Practical roadmap
 
 1. Build a versioned golden set with reviewer agreement and look-alike/sound-alike cases.
 2. Compare every OCR or model proposal on that same set and adopt only measured improvements.
-3. Replace unverified CSV provenance with licensed, versioned sources and stable medicine identifiers.
-4. Replace the bootstrap-admin login with external identity, role/tenant claims, and managed migrations before onboarding multiple reviewers.
-5. Complete operational security, accessibility, workflow, and prospective clinical validation before production use.
+3. Replace unverified CSV provenance with licensed, versioned sources and stable medicine identifiers. Until then, keep the committed CSVs and record what is known in [docs/DATASET_PROVENANCE.md](docs/DATASET_PROVENANCE.md).
+4. Prefer OpenID Connect for shared reviewer access; keep the bootstrap admin account as emergency access only. See [docs/CONSENT_AND_RETENTION.md](docs/CONSENT_AND_RETENTION.md).
+5. Complete operational security, accessibility, workflow, and prospective clinical validation before production use. Start from [docs/simpliscribe-threat-model.md](docs/simpliscribe-threat-model.md).
 
 ### Shipped workflow safeguards
 
@@ -236,7 +247,7 @@ Requirements reviewed from supplied course material were distilled without copyi
 
 These are technical safeguards, not clinical validation. SimpliScribe will not add patient registration, consultation/diagnosis records, automatic treatment decisions, medicine reminders, or drug-interaction decisioning without a separately approved clinical, privacy, and governance design.
 
-Code is MIT licensed. Dataset files may have separate upstream terms; verify and document those terms before redistribution.
+Code is MIT licensed. Dataset files may have separate upstream terms; see [docs/DATASET_PROVENANCE.md](docs/DATASET_PROVENANCE.md) before redistribution.
 
 ## Docker deployment
 
@@ -274,7 +285,7 @@ OIDC_REVIEWER_SUBJECTS=<comma-separated-provider-subject-ids>
 
 Production behavior includes signed HTTP-only cookies, CSRF validation, explicit upload consent, automatic analysis expiry, redacted audit events, protected history/details/reports/review APIs, analysis concurrency limits, CSP/HSTS headers, and a non-root container liveness check. OIDC users map to admin/reviewer/auditor roles; unmapped users are read-only auditors.
 
-The configured administrator is a local bootstrap account. Use OIDC before onboarding multiple reviewers. Apply schema changes through the managed Alembic migrations below, not ad-hoc DDL, before independently evolving multiple deployed versions.
+The configured administrator is a local bootstrap account. Prefer OIDC before onboarding multiple reviewers; keep bootstrap credentials in the secret manager for emergency access. Apply schema changes through the managed Alembic migrations below, not ad-hoc DDL, before independently evolving multiple deployed versions.
 
 ### Database migrations (Alembic)
 
@@ -291,12 +302,14 @@ alembic current
 The `simpliscribe.storage` bootstrap still auto-creates the base tables on first app start (`ensure_schema()`), so local development and the test suite keep working without a manual step. In production, run `alembic upgrade head` as part of the release and evolve the schema by adding a new revision (`alembic revision --autogenerate -m "describe change"`) rather than editing existing ones.
 
 
-The review screen supports correction, confirmation, unreadable rejection, and sign-out for shared workstations. Original uploads are removed after processing, so reviewers must compare against their own source document during the active workflow. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing. Configure request-size limits at the ingress/proxy as well as `MAX_UPLOAD_MB`; multipart bodies reach the server before application validation.
+The review screen supports correction, confirmation, unreadable rejection, and sign-out for shared workstations. Original uploads are removed after processing, so reviewers must compare against their own source document during the active workflow. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing. See [docs/CONSENT_AND_RETENTION.md](docs/CONSENT_AND_RETENTION.md) and [docs/simpliscribe-threat-model.md](docs/simpliscribe-threat-model.md). Configure request-size limits at the ingress/proxy as well as `MAX_UPLOAD_MB`; multipart bodies reach the server before application validation.
 
 ```bash
 docker build -t simpliscribe .
 docker run --rm -p 127.0.0.1:7860:7860 --env-file production.env simpliscribe
 ```
+
+CI builds the image with `--build-arg PRELOAD_OCR=0` so the job does not download OCR weights. Production images should keep the default `PRELOAD_OCR=1`.
 
 The image defaults to `APP_ENV=production` and fails closed without the complete production configuration above. Keep `production.env` outside the repository and secret manager values out of `.env.example`. Production session cookies require HTTPS: keep the container bound to loopback and place a TLS-terminating reverse proxy in front of `http://127.0.0.1:7860`; do not expose or browse the raw HTTP port directly. Use the local `uvicorn` workflow, not a remotely reachable Docker container, for unauthenticated development.
 

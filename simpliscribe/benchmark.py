@@ -193,6 +193,29 @@ def load_cases(cases_path: Path, limit: int | None = None) -> list[dict[str, Any
     return load_case_bundle(cases_path, limit=limit)[1]
 
 
+def merge_case_bundles(
+    primary: tuple[dict[str, Any], list[dict[str, Any]]],
+    extra: tuple[dict[str, Any], list[dict[str, Any]]] | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    metadata, cases = primary
+    if extra is None:
+        return metadata, cases
+    extra_metadata, extra_cases = extra
+    if not extra_cases:
+        return metadata, cases
+    seen_ids = {str(case.get("id") or "").strip() for case in cases}
+    merged = list(cases)
+    for case in extra_cases:
+        case_id = str(case.get("id") or "").strip()
+        if case_id in seen_ids:
+            raise ValueError(f"Duplicate benchmark case id: {case_id}.")
+        seen_ids.add(case_id)
+        merged.append(case)
+    combined = dict(metadata)
+    combined["extra_dataset"] = extra_metadata.get("dataset")
+    return combined, merged
+
+
 def score_case(case: dict[str, Any], actual: list[dict[str, Any]]) -> CaseScore:
     expected = case.get("expected_medications") or []
     if not isinstance(expected, list):
@@ -468,6 +491,11 @@ def print_summary(result: dict[str, Any]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a local extraction benchmark against sample prescription cases.")
     parser.add_argument("--cases", default=str(DEFAULT_BENCHMARK_CASES), help="Path to benchmark cases JSON file.")
+    parser.add_argument(
+        "--extra-cases",
+        default="",
+        help="Optional additional JSON bundle to append. Empty clinician files are ignored. Never use this to replace --cases.",
+    )
     parser.add_argument("--output", default="", help="Optional path to write benchmark results JSON.")
     parser.add_argument("--limit", type=int, default=0, help="Optional maximum number of cases to run. Use 0 for all cases.")
     parser.add_argument("--min-f1", type=float, default=0.0, help="Fail when medication-name F1 is below this value.")
@@ -480,7 +508,10 @@ def main() -> None:
     cases_path = Path(args.cases)
     output_path = Path(args.output) if args.output else DEFAULT_BENCHMARK_OUTPUT_DIR / "latest.json"
 
-    metadata, cases = load_case_bundle(cases_path, limit=args.limit or None)
+    extra = None
+    if args.extra_cases:
+        extra = load_case_bundle(Path(args.extra_cases), limit=args.limit or None)
+    metadata, cases = merge_case_bundles(load_case_bundle(cases_path, limit=args.limit or None), extra)
     result = run_benchmark(cases, base_dir=cases_path.parent, metadata=metadata)
     save_benchmark_result(result, output_path)
     print_summary(result)

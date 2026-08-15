@@ -326,6 +326,18 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
         ):
             if isinstance(value, str) and value.strip():
                 detail_rows.append([paragraph(label, meta_style), paragraph(value.strip(), body_style)])
+        lookup = med.get("alternatives_lookup") if isinstance(med.get("alternatives_lookup"), dict) else {}
+        skipped = str(lookup.get("skipped_reason") or "")
+        if skipped == "lookup_disabled":
+            detail_rows.append([
+                paragraph("Unavailable-medicine lookup", meta_style),
+                paragraph("Local dataset had no same-composition brands. Web/model lookup was off.", body_style),
+            ])
+        elif skipped == "no_validated_candidates":
+            detail_rows.append([
+                paragraph("Unavailable-medicine lookup", meta_style),
+                paragraph("Web/model lookup ran but no names passed local dataset validation.", body_style),
+            ])
         if detail_rows:
             story.extend([Spacer(1, 4), build_detail_table(detail_rows, [38 * mm, 130 * mm], background="#f8fafc")])
         story.append(Spacer(1, 9))
@@ -338,12 +350,23 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
     story.append(paragraph(raw_text or "No OCR text captured.", ocr_style))
     story.append(Spacer(1, 10))
     story.append(paragraph("Report trace", heading_style))
-    story.append(build_detail_table([
+    trace_rows = [
         [paragraph("Report ID", meta_style), paragraph(report_id, body_style)],
         [paragraph("Dataset sources", meta_style), paragraph(", ".join(dataset_names) if dataset_names else "OCR only", body_style)],
+        [paragraph("Requested provider", meta_style), paragraph(safe_text(pipeline.get("requested_provider"), "Not reported"), body_style)],
+        [paragraph("Used provider", meta_style), paragraph(safe_text(pipeline.get("used_provider"), "Not reported"), body_style)],
         [paragraph("Review status", meta_style), paragraph(display_status(analysis.get("review_status")), body_style)],
         [paragraph("Prior review states", meta_style), paragraph(str(len(review_versions)), body_style)],
-    ], col_widths=[38 * mm, 130 * mm], background="#f8fafc"))
+    ]
+    if pipeline.get("degraded") or pipeline.get("error_code"):
+        trace_rows.append([
+            paragraph("Degraded output", meta_style),
+            paragraph(
+                safe_text(pipeline.get("error_code"), "DEGRADED") + ". " + " ".join(safe_list(pipeline.get("warnings"))),
+                body_style,
+            ),
+        ])
+    story.append(build_detail_table(trace_rows, col_widths=[38 * mm, 130 * mm], background="#f8fafc"))
 
     doc.build(story, onFirstPage=lambda canvas, report_doc: draw_page_chrome(canvas, report_doc, app_name), onLaterPages=lambda canvas, report_doc: draw_page_chrome(canvas, report_doc, app_name))
     return buffer.getvalue()

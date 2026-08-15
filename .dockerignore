@@ -11,5 +11,16 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/analysis_history.json
+data/benchmark_runs
+data/coverage.xml
+.github
+.omo
+.cursor
+.pytest_cache
+htmlcov
+.coverage
+coverage.xml
+tests
+*.pdf
 archive (3)
 synthetic_prescription_dataset

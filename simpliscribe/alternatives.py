@@ -316,10 +316,30 @@ def fetch_alternatives(medicine_name: str) -> list[dict[str, str]]:
     return items
 
 
+def _lookup_status(*, local: list[str], web: list[dict[str, str]] | None, ran_web: bool, web_enabled: bool) -> dict[str, Any]:
+    skipped_reason = ""
+    if local:
+        skipped_reason = "local_candidates_present"
+    elif not web_enabled:
+        skipped_reason = "lookup_disabled"
+    elif ran_web and not web:
+        skipped_reason = "no_validated_candidates"
+    return {
+        "local_count": len(local),
+        "web_enabled": web_enabled,
+        "web_ran": bool(ran_web and web_enabled),
+        "web_count": len(web or []),
+        "skipped_reason": skipped_reason,
+    }
+
+
 def attach_alternative_candidates(payload: dict[str, Any]) -> dict[str, Any]:
     """Attach local dataset peers always, then optional model/web candidates when those are absent."""
     existing = payload.get("substitutes") if isinstance(payload.get("substitutes"), list) else []
     local = dataset_reference_candidates(str(payload.get("name") or ""), existing)
+    web: list[dict[str, str]] = []
+    ran_web = False
+    web_enabled = bool(settings.alternatives_enabled)
     if local:
         payload["substitutes"] = local
         payload["requires_review"] = True
@@ -327,15 +347,24 @@ def attach_alternative_candidates(payload: dict[str, Any]) -> dict[str, Any]:
         reasons = payload.setdefault("review_reasons", [])
         if reason not in reasons:
             reasons.append(reason)
-    if not settings.alternatives_enabled or payload.get("substitutes"):
-        return payload
-    candidates = fetch_alternatives(str(payload.get("name") or ""))
-    if not candidates:
-        return payload
-    payload["web_alternatives"] = candidates
-    payload["requires_review"] = True
-    web_reason = "Alternative reference candidates were sourced from a model/web search and must be verified by a prescriber."
-    reasons = payload.setdefault("review_reasons", [])
-    if web_reason not in reasons:
-        reasons.append(web_reason)
+    elif web_enabled:
+        ran_web = True
+        web = fetch_alternatives(str(payload.get("name") or ""))
+        if web:
+            payload["web_alternatives"] = web
+            payload["requires_review"] = True
+            web_reason = "Alternative reference candidates were sourced from a model/web search and must be verified by a prescriber."
+            reasons = payload.setdefault("review_reasons", [])
+            if web_reason not in reasons:
+                reasons.append(web_reason)
+    lookup = _lookup_status(local=local, web=web, ran_web=ran_web, web_enabled=web_enabled)
+    payload["alternatives_lookup"] = lookup
+    if local:
+        payload["alternatives_status"] = "local_dataset"
+    elif web:
+        payload["alternatives_status"] = "web_model"
+    elif lookup["skipped_reason"] == "lookup_disabled":
+        payload["alternatives_status"] = "web_disabled"
+    elif lookup["skipped_reason"] == "no_validated_candidates":
+        payload["alternatives_status"] = "web_empty"
     return payload

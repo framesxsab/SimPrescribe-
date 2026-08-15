@@ -26,34 +26,15 @@
             },
         }
     </script>
+    <link rel="stylesheet" href="/static/workspace.css"/>
     <style>
         body { font-family: 'Inter', sans-serif; }
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 min-h-screen">
-<header class="sticky top-0 z-50 border-b border-slate-200/80 dark:border-slate-800 bg-background-light/90 dark:bg-background-dark/90 backdrop-blur-md">
-    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-            <div class="w-9 h-9 bg-primary rounded-xl flex items-center justify-center text-white">
-                <span class="material-symbols-outlined text-xl">health_metrics</span>
-            </div>
-            <h1 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white">{{ app_name }}</h1>
-        </div>
-        <nav class="hidden md:flex items-center gap-8">
-            <a class="text-sm font-semibold text-primary" href="/">Dashboard</a>
-            <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="/history">History</a>
-            <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="#recent-activity">Recent Activity</a>
-        </nav>
-        {% if user %}
-        <form method="post" action="/logout">
-            <input type="hidden" name="csrf" value="{{ csrf_token }}">
-            <button class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200" type="submit">Sign out</button>
-        </form>
-        {% endif %}
-        <span class="hidden lg:inline text-xs font-medium text-slate-500 dark:text-slate-400">OCR + medicine reference datasets</span>
-    </div>
-</header>
-<main class="max-w-6xl mx-auto px-6 py-10">
+{% set current = 'dashboard' %}
+{% include "partials/nav.html" %}
+<main id="main-content" class="max-w-6xl mx-auto px-6 py-10">
     <section class="mb-12 max-w-3xl">
         <p class="text-sm font-semibold text-primary mb-3">Prescription analysis workspace</p>
         <h2 class="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight">
@@ -67,7 +48,8 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-16">
         <div class="bg-white dark:bg-slate-900/50 p-8 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center justify-center text-center">
             <form id="upload-form" class="w-full h-64 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900/60 flex flex-col items-center justify-center group cursor-pointer hover:border-primary hover:bg-primary/5 transition-all relative">
-                <input type="file" id="prescription_image" name="file" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept="image/png, image/jpeg, image/webp, application/pdf">
+                <label for="prescription_image" class="sr-only">Prescription image or PDF</label>
+                <input type="file" id="prescription_image" name="file" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept="image/png, image/jpeg, image/webp, application/pdf" aria-describedby="upload-text">
                 <span class="material-symbols-outlined text-4xl text-primary mb-3">cloud_upload</span>
                 <p class="text-slate-900 dark:text-white font-semibold mb-1" id="upload-text">Drag and drop prescription</p>
                 <p class="text-xs text-slate-500 mb-6 font-medium">PDF, JPG, PNG, or WEBP</p>
@@ -80,7 +62,8 @@
                     <input id="processing-consent" type="checkbox" class="mt-1 rounded border-slate-300 text-primary focus:ring-primary">
                     <span>I consent to processing this prescription for OCR and medication review. I understand that results require confirmation against the original document.</span>
                  </label>
-                 <button id="analyze-btn" class="hidden bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-8 py-3 rounded-xl font-semibold text-sm shadow-sm hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors mx-auto">Analyze Now</button>
+                 <button id="analyze-btn" type="button" disabled class="hidden bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-8 py-3 rounded-xl font-semibold text-sm shadow-sm hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors mx-auto disabled:opacity-40 disabled:cursor-not-allowed">Analyze Now</button>
+                 <p id="consent-hint" class="hidden mt-2 text-xs text-amber-700">Check consent before analysis starts.</p>
             </div>
             <p class="mt-4 text-xs text-slate-500">Maximum upload size: {{ max_upload_mb }} MB</p>
             <div class="mt-6 flex items-center gap-2 text-slate-500 text-xs text-center mx-auto justify-center">
@@ -96,29 +79,31 @@
                         <span id="scan-status" class="px-3 py-1.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-bold rounded-full uppercase">Awaiting File</span>
                     </div>
                     <div class="flex-1 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden relative flex items-center justify-center">
-                        <img id="preview-image" class="hidden w-full h-full object-cover" src="" alt="Preview"/>
+                        <img id="preview-image" class="hidden w-full h-full object-contain bg-slate-50" src="" alt="Selected prescription preview"/>
                         <div id="pdf-preview-label" class="hidden absolute inset-6 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/90 px-6 py-8 text-center">
-                            <span class="material-symbols-outlined text-5xl text-primary">picture_as_pdf</span>
+                            <span class="material-symbols-outlined text-5xl text-primary" aria-hidden="true">picture_as_pdf</span>
                             <p class="mt-4 text-sm font-bold text-slate-900 dark:text-white">PDF document ready</p>
                             <p class="mt-2 text-xs text-slate-500">The first page will be converted before OCR.</p>
                         </div>
-                        <div id="processing-overlay" class="hidden absolute inset-0 flex items-center justify-center bg-slate-900/10 dark:bg-slate-100/10 backdrop-blur-sm z-10 transition-opacity">
-                            <div class="bg-white/90 dark:bg-slate-800/90 px-4 py-2 rounded-full shadow-lg border border-primary/20 flex items-center gap-2">
-                                <span class="w-2 h-2 bg-primary rounded-full animate-pulse"></span>
-                                <span class="text-xs font-bold text-slate-700 dark:text-slate-200">Processing Document...</span>
+                        <div id="processing-overlay" class="hidden absolute inset-0 flex items-center justify-center bg-slate-900/20 dark:bg-slate-100/10 backdrop-blur-sm z-10 transition-opacity" role="status" aria-live="polite" aria-busy="false">
+                            <div class="bg-white/95 dark:bg-slate-800/95 px-5 py-3 rounded-2xl shadow-lg border border-primary/20 flex items-center gap-3">
+                                <span class="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" aria-hidden="true"></span>
+                                <span id="loader-status" class="text-xs font-bold text-slate-700 dark:text-slate-200">Processing document…</span>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
     </div>
+
+    <div id="analyze-error" class="hidden mb-8 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800" role="alert"></div>
     
     <section id="results-area" class="hidden">
         <div id="review-banner" role="status" class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
             <strong>Human review required.</strong> Compare every name, strength, frequency, and duration with the original prescription. This tool does not prescribe or select substitutes.
             <p id="pipeline-warning" class="mt-1 text-xs text-amber-800"></p>
         </div>
+        <div id="pipeline-status" class="mb-6 hidden rounded-2xl border border-slate-200 bg-white dark:bg-slate-900 px-5 py-4 text-sm text-slate-700 dark:text-slate-200"></div>
         <div class="flex items-center justify-between mb-8">
             <div>
                 <h3 class="text-2xl font-bold text-slate-900 dark:text-white">Medication summary</h3>
@@ -190,6 +175,12 @@
                 <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
                     {{ analysis.medications|length }} medication{% if analysis.medications|length != 1 %}s{% endif %} extracted
                 </p>
+                {% if analysis.pipeline and analysis.pipeline.degraded %}
+                <p class="mt-2 text-xs font-semibold uppercase tracking-wide text-amber-700">Degraded labeled output</p>
+                {% endif %}
+                {% if analysis.pipeline and analysis.pipeline.used_provider %}
+                <p class="mt-1 text-xs text-slate-500">Provider: {{ analysis.pipeline.used_provider }}</p>
+                {% endif %}
             </a>
             {% endfor %}
         </div>
@@ -216,6 +207,15 @@
         <td class="px-6 py-4 align-top text-sm font-medium text-slate-800 dark:text-slate-200 med-duration whitespace-nowrap"></td>
         <td class="px-6 py-4 align-top text-xs text-slate-500 leading-relaxed med-insight"></td>
     </tr>
+    <tr class="med-alt-row border-t-0">
+        <td colspan="6" class="px-6 pb-4 pt-0">
+            <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">If unavailable (local dataset)</p>
+            <div class="med-local-alts flex flex-wrap gap-1.5"></div>
+            <p class="text-[10px] font-bold uppercase tracking-wider text-indigo-500 mt-3 mb-1">If unavailable (web/model)</p>
+            <div class="med-web-alts flex flex-wrap gap-1.5"></div>
+            <p class="hidden mt-2 text-[11px] text-slate-500 med-alt-note"></p>
+        </td>
+    </tr>
 </template>
 
 <footer class="mt-20 border-t border-slate-200 dark:border-slate-800 py-10 bg-white dark:bg-slate-950">
@@ -233,7 +233,12 @@
     </div>
 </footer>
 
+    <script src="/static/workspace.js"></script>
 <script>
+    const ui = window.SimpliScribeUI;
+    if (!ui) {
+        throw new Error("workspace.js failed to load");
+    }
     const fileInput = document.getElementById('prescription_image');
     const previewImage = document.getElementById('preview-image');
     const uploadText = document.getElementById('upload-text');
@@ -255,34 +260,10 @@
         </svg>
     `)}`;
 
-    function safeList(values) {
-        return Array.isArray(values) ? values.filter(Boolean) : [];
-    }
-
-    function setText(node, value, fallback = 'Not available') {
-        if (!node) return;
-        node.textContent = value && String(value).trim() ? String(value).trim() : fallback;
-    }
-
-    function renderChips(container, values, emptyLabel) {
-        if (!container) return;
-        container.innerHTML = '';
-        const items = safeList(values);
-        if (!items.length) {
-            const chip = document.createElement('span');
-            chip.className = 'inline-flex items-center rounded-full bg-slate-200 dark:bg-slate-700 px-3 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300';
-            chip.textContent = emptyLabel;
-            container.appendChild(chip);
-            return;
-        }
-
-        items.forEach(value => {
-            const chip = document.createElement('span');
-            chip.className = 'inline-flex items-center rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200';
-            chip.textContent = value;
-            container.appendChild(chip);
-        });
-    }
+    const safeList = ui.safeList;
+    const setText = ui.setText;
+    const renderChips = ui.renderChips;
+    const formatPackAndManufacturer = ui.formatPackAndManufacturer;
 
     function escapeHtml(value) {
         return String(value || '')
@@ -293,18 +274,162 @@
             .replace(/'/g, '&#39;');
     }
 
-    function formatPackAndManufacturer(med) {
-        const parts = [med.pack_size, med.manufacturer].filter(Boolean);
-        return parts.length ? parts.join(' • ') : 'Not available';
+    async function readJson(response) {
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            throw new Error(response.ok ? 'Unexpected server response.' : `Server error (${response.status}).`);
+        }
+        return response.json();
+    }
+
+    const consentBox = document.getElementById('processing-consent');
+    const consentHint = document.getElementById('consent-hint');
+    const analyzeError = document.getElementById('analyze-error');
+    const pipelineStatus = document.getElementById('pipeline-status');
+    const loaderStatus = document.getElementById('loader-status');
+    const alternativesEnabled = {{ alternatives_enabled | tojson }};
+    const loaderSteps = [
+        'Reading document…',
+        'Running OCR…',
+        'Structuring medications…',
+        'Checking local reference candidates…',
+        alternativesEnabled ? 'Checking web/model candidates if local list is empty…' : 'Web/model lookup is off; using local datasets only…',
+    ];
+    let loaderTimer = null;
+
+    function showError(message) {
+        analyzeError.textContent = message;
+        analyzeError.classList.remove('hidden');
+        analyzeError.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function clearError() {
+        analyzeError.textContent = '';
+        analyzeError.classList.add('hidden');
+    }
+
+    function syncAnalyzeEnabled() {
+        const hasFile = Boolean(fileInput.files && fileInput.files[0]);
+        const consented = Boolean(consentBox && consentBox.checked);
+        if (hasFile) analyzeBtn.classList.remove('hidden');
+        analyzeBtn.disabled = !(hasFile && consented);
+        consentHint.classList.toggle('hidden', !hasFile || consented);
+    }
+
+    function startLoader() {
+        processingOverlay.classList.remove('hidden');
+        processingOverlay.setAttribute('aria-busy', 'true');
+        let step = 0;
+        loaderStatus.textContent = loaderSteps[0];
+        loaderTimer = window.setInterval(() => {
+            step = Math.min(step + 1, loaderSteps.length - 1);
+            loaderStatus.textContent = loaderSteps[step];
+        }, 4000);
+    }
+
+    function stopLoader() {
+        if (loaderTimer) window.clearInterval(loaderTimer);
+        loaderTimer = null;
+        processingOverlay.classList.add('hidden');
+        processingOverlay.setAttribute('aria-busy', 'false');
+    }
+
+    function altNote(lookup) {
+        const reason = lookup && lookup.skipped_reason;
+        if (reason === 'local_candidates_present') return 'Local same-composition / listed brands shown first. Web/model lookup skipped.';
+        if (reason === 'lookup_disabled') return 'Local dataset had no same-composition brands. Web/model lookup is off (ALTERNATIVES_ENABLED).';
+        if (reason === 'no_validated_candidates') return 'Web/model lookup ran; no names passed local dataset validation.';
+        if (lookup && lookup.web_count) return 'Web/model candidates were validated against the local datasets. Not a recommendation to switch.';
+        return 'No unavailable-medicine reference candidates for this name.';
+    }
+
+    function renderPipeline(data) {
+        const pipeline = data.pipeline || {};
+        const warnings = [...(pipeline.warnings || []), ...(pipeline.ocr_warnings || [])];
+        document.getElementById('pipeline-warning').textContent = warnings.join(' ');
+        const parts = [
+            `Requested provider: ${pipeline.requested_provider || 'not reported'}`,
+            `Used provider: ${pipeline.used_provider || 'not reported'}`,
+        ];
+        if (pipeline.ocr_confidence != null) parts.push(`OCR confidence: ${Math.round(Number(pipeline.ocr_confidence) * 100)}%`);
+        if (pipeline.degraded) parts.push('Degraded output: labeled fallback, not a silent partial result.');
+        if (pipeline.error_code) parts.push(`Error code: ${pipeline.error_code}`);
+        pipelineStatus.textContent = parts.join(' · ');
+        pipelineStatus.classList.remove('hidden');
+        pipelineStatus.className = pipeline.degraded
+            ? 'mb-6 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-950'
+            : 'mb-6 rounded-2xl border border-slate-200 bg-white dark:bg-slate-900 px-5 py-4 text-sm text-slate-700 dark:text-slate-200';
+    }
+
+    function fillHeaders(data) {
+        document.getElementById('patient-name-display').textContent = data.patient_name || 'N/A';
+        document.getElementById('doctor-name-display').textContent = data.doctor_name || 'N/A';
+        document.getElementById('date-display').textContent = data.date || 'N/A';
+    }
+
+    function renderMedication(med) {
+        const clone = template.content.cloneNode(true);
+        const qs = (sel) => clone.querySelector(sel);
+        if (qs('.med-name')) qs('.med-name').textContent = med.name || 'Unknown';
+        if (qs('.med-type')) qs('.med-type').textContent = med.type || 'MEDICATION';
+        if (qs('.med-composition')) {
+            setText(qs('.med-composition'), med.composition);
+            qs('.med-composition').title = formatPackAndManufacturer(med);
+        }
+        const packLine = formatPackAndManufacturer(med);
+        if (qs('.med-composition') && packLine !== 'Not available') {
+            qs('.med-composition').textContent += ` (${packLine})`;
+        }
+        if (qs('.med-dosage')) qs('.med-dosage').textContent = med.dosage || 'N/A';
+        if (qs('.med-frequency')) qs('.med-frequency').textContent = med.frequency || 'N/A';
+        if (qs('.med-duration')) qs('.med-duration').textContent = med.duration || 'N/A';
+        if (qs('.med-insight')) qs('.med-insight').textContent = med.insight || 'Follow doctor\'s instructions carefully.';
+        if (med.requires_review && qs('.med-review')) qs('.med-review').classList.remove('hidden');
+        renderChips(qs('.med-local-alts'), med.substitutes, 'No local dataset candidates');
+        const webNames = safeList(med.web_alternatives).map((item) => item && item.name ? item.name : item);
+        renderChips(qs('.med-web-alts'), webNames, alternativesEnabled ? 'No validated web/model candidates' : 'Web/model lookup off');
+        const note = qs('.med-alt-note');
+        if (note) {
+            note.textContent = altNote(med.alternatives_lookup);
+            note.classList.remove('hidden');
+        }
+        medicationsContainer.appendChild(clone);
+    }
+
+    function renderResults(data) {
+        fillHeaders(data);
+        renderPipeline(data);
+        medicationsContainer.innerHTML = '';
+        if (data.medications && data.medications.length > 0) {
+            data.medications.forEach(renderMedication);
+            scanStatus.className = "px-3 py-1.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-[10px] font-bold rounded-full uppercase";
+            scanStatus.innerText = "Ready for Review";
+        } else {
+            medicationsContainer.innerHTML = `
+                <tr>
+                    <td colspan="6" class="px-6 py-10 text-center">
+                        <div class="text-slate-400 mb-2">
+                            <span class="material-symbols-outlined text-3xl">search_off</span>
+                        </div>
+                        <p class="text-sm font-semibold text-slate-500">No medications could be identified</p>
+                        <p class="text-xs text-slate-400 mt-1">${escapeHtml(data.pipeline?.error_code ? data.pipeline.error_code + ': labeled empty payload for review.' : 'The prescription text was extracted but no medicines were recognized. Try a clearer image.')}</p>
+                    </td>
+                </tr>
+            `;
+            scanStatus.className = "px-3 py-1.5 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-[10px] font-bold rounded-full uppercase";
+            scanStatus.innerText = data.pipeline?.degraded ? "Degraded" : "Partial Scan";
+        }
+        resultsArea.classList.remove('hidden');
+        resultsArea.scrollIntoView({ behavior: 'smooth' });
     }
 
     fileInput.addEventListener('change', function(e) {
         if(e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
             uploadText.innerText = file.name;
-            scanStatus.className = "px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-[10px] font-bold rounded uppercase";
+            scanStatus.className = "px-3 py-1.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-[10px] font-bold rounded-full uppercase";
             scanStatus.innerText = "Ready to Scan";
-            analyzeBtn.classList.remove('hidden');
+            syncAnalyzeEnabled();
 
             if (file.type === 'application/pdf') {
                 previewImage.src = pdfPlaceholderSvg;
@@ -323,18 +448,41 @@
         }
     });
 
+    consentBox.addEventListener('change', syncAnalyzeEnabled);
+
+    const uploadForm = document.getElementById('upload-form');
+    uploadForm.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        uploadForm.classList.add('border-primary');
+    });
+    uploadForm.addEventListener('dragleave', () => uploadForm.classList.remove('border-primary'));
+    uploadForm.addEventListener('drop', (event) => {
+        event.preventDefault();
+        uploadForm.classList.remove('border-primary');
+        const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+        if (!file) return;
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        fileInput.files = transfer.files;
+        fileInput.dispatchEvent(new Event('change'));
+    });
+
     analyzeBtn.addEventListener('click', async function() {
         if(!fileInput.files[0]) return;
-        
-        processingOverlay.classList.remove('hidden');
+        if (!consentBox.checked) {
+            showError('Explicit processing consent is required.');
+            return;
+        }
+        clearError();
+        startLoader();
         scanStatus.innerText = "Active Scan";
         analyzeBtn.disabled = true;
         analyzeBtn.innerHTML = "Processing...";
         analyzeBtn.classList.add("opacity-50");
-        
+
         const formData = new FormData();
         formData.append("file", fileInput.files[0]);
-        formData.append("consent", document.getElementById('processing-consent').checked ? "true" : "false");
+        formData.append("consent", "true");
         formData.append("csrf", "{{ csrf_token }}");
 
         try {
@@ -343,74 +491,26 @@
                 headers: {'X-CSRF-Token': '{{ csrf_token }}'},
                 body: formData
             });
-            
-            const data = await response.json();
-            if(!response.ok) throw new Error(data.error || data.detail || "Server Error");
-            lastAnalysis = data;
-            
-            medicationsContainer.innerHTML = '';
-            
-            if (data.medications && data.medications.length > 0) {
-                if (document.getElementById('patient-name-display')) document.getElementById('patient-name-display').textContent = data.patient_name || 'N/A';
-                if (document.getElementById('doctor-name-display')) document.getElementById('doctor-name-display').textContent = data.doctor_name || 'N/A';
-                if (document.getElementById('date-display')) document.getElementById('date-display').textContent = data.date || 'N/A';
-                const pipelineWarnings = [...(data.pipeline?.warnings || []), ...(data.pipeline?.ocr_warnings || [])];
-                document.getElementById('pipeline-warning').textContent = pipelineWarnings.join(' ');
-
-                data.medications.forEach(med => {
-                    const clone = template.content.cloneNode(true);
-                    const qs = (sel) => clone.querySelector(sel);
-                    
-                    if (qs('.med-name')) qs('.med-name').textContent = med.name || 'Unknown';
-                    if (qs('.med-type')) qs('.med-type').textContent = med.type || 'MEDICATION';
-                    if (qs('.med-composition')) setText(qs('.med-composition'), med.composition);
-                    if (qs('.med-dosage')) qs('.med-dosage').textContent = med.dosage || 'N/A';
-                    if (qs('.med-frequency')) qs('.med-frequency').textContent = med.frequency || 'N/A';
-                    if (qs('.med-duration')) qs('.med-duration').textContent = med.duration || 'N/A';
-                    if (qs('.med-insight')) qs('.med-insight').textContent = med.insight || 'Follow doctor\'s instructions carefully.';
-                    if (med.requires_review && qs('.med-review')) qs('.med-review').classList.remove('hidden');
-
-                    medicationsContainer.appendChild(clone);
-                });
-                
-                scanStatus.className = "px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-[10px] font-bold rounded uppercase";
-                scanStatus.innerText = "Ready for Review";
-                resultsArea.classList.remove('hidden');
-                resultsArea.scrollIntoView({ behavior: 'smooth' });
-            } else {
-                // Show metadata if available even with no meds
-                if (document.getElementById('patient-name-display')) document.getElementById('patient-name-display').textContent = data.patient_name || 'N/A';
-                if (document.getElementById('doctor-name-display')) document.getElementById('doctor-name-display').textContent = data.doctor_name || 'N/A';
-                if (document.getElementById('date-display')) document.getElementById('date-display').textContent = data.date || 'N/A';
-                
-                // Show a graceful in-page message instead of alert
-                medicationsContainer.innerHTML = `
-                    <tr>
-                        <td colspan="6" class="px-6 py-10 text-center">
-                            <div class="text-slate-400 mb-2">
-                                <span class="material-symbols-outlined text-3xl">search_off</span>
-                            </div>
-                            <p class="text-sm font-semibold text-slate-500">No medications could be identified</p>
-                            <p class="text-xs text-slate-400 mt-1">The prescription text was extracted but no medicines were recognized. Try a clearer image.</p>
-                        </td>
-                    </tr>
-                `;
-                scanStatus.className = "px-2 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-[10px] font-bold rounded uppercase";
-                scanStatus.innerText = "Partial Scan";
-                resultsArea.classList.remove('hidden');
-                resultsArea.scrollIntoView({ behavior: 'smooth' });
+            const data = await readJson(response);
+            const labeledPayload = Boolean(data && (data.pipeline || Array.isArray(data.medications)));
+            if(!response.ok && !labeledPayload) {
+                throw new Error(ui.errorMessage(data, "Server Error"));
             }
-            
+            if(!response.ok && labeledPayload) {
+                showError(ui.errorMessage(data, "Analysis completed with a labeled fallback."));
+            }
+            lastAnalysis = data;
+            renderResults(data);
         } catch(err) {
             console.error(err);
-            alert(err.message || "Error analyzing prescription. Make sure backend is running.");
-            scanStatus.className = "px-2 py-1 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 text-[10px] font-bold rounded uppercase";
+            showError(err.message || "Error analyzing prescription. Make sure backend is running.");
+            scanStatus.className = "px-3 py-1.5 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 text-[10px] font-bold rounded-full uppercase";
             scanStatus.innerText = "Error";
         } finally {
-            processingOverlay.classList.add('hidden');
-            analyzeBtn.disabled = false;
+            stopLoader();
             analyzeBtn.innerHTML = "Analyze Again";
             analyzeBtn.classList.remove("opacity-50");
+            syncAnalyzeEnabled();
         }
     });
 
@@ -419,7 +519,7 @@
         downloadReportBtn.addEventListener('click', async function() {
             const analysisId = lastAnalysis && (lastAnalysis.analysis_id || lastAnalysis.id);
             if (!analysisId) {
-                alert('Run an analysis before downloading the PDF report.');
+                showError('Run an analysis before downloading the PDF report.');
                 return;
             }
             const originalLabel = downloadReportBtn.innerHTML;
@@ -430,8 +530,13 @@
             try {
                 const response = await fetch(`/api/report/${encodeURIComponent(analysisId)}`);
                 if (!response.ok) {
-                    const message = await response.text();
-                    throw new Error(message || 'PDF generation failed.');
+                    let message = 'PDF generation failed.';
+                    const contentType = response.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                        const payload = await response.json();
+                        message = [payload.error_code, payload.error || payload.detail].filter(Boolean).join(': ') || message;
+                    }
+                    throw new Error(message);
                 }
 
                 const blob = await response.blob();
@@ -453,7 +558,7 @@
                 window.setTimeout(() => URL.revokeObjectURL(url), 1000);
             } catch (error) {
                 console.error('PDF export failed.', error);
-                alert('The PDF could not be generated. Please try again.');
+                showError(error.message || 'The PDF could not be generated. Please try again.');
             } finally {
                 downloadReportBtn.disabled = false;
                 downloadReportBtn.classList.remove('opacity-60', 'cursor-not-allowed');

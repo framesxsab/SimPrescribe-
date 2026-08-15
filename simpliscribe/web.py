@@ -69,6 +69,7 @@ async def render_dashboard(request: Request, templates) -> HTMLResponse:
             "recent_analyses": load_history(owner)[:5],
             "max_upload_mb": settings.max_upload_mb,
             "app_name": settings.app_name,
+            "alternatives_enabled": settings.alternatives_enabled,
             **public_user_context(request),
         },
     )
@@ -83,7 +84,12 @@ async def render_details(request: Request, analysis_id: str, templates) -> HTMLR
     analysis = get_analysis_record(analysis_id, owner_id(request))
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
-    return templates.TemplateResponse(request, "details.html", {"analysis": analysis, "app_name": settings.app_name, **public_user_context(request)})
+    return templates.TemplateResponse(request, "details.html", {
+        "analysis": analysis,
+        "app_name": settings.app_name,
+        "alternatives_enabled": settings.alternatives_enabled,
+        **public_user_context(request),
+    })
 
 
 async def history_payload(request: Request) -> dict[str, Any]:

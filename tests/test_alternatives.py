@@ -261,6 +261,8 @@ def test_attach_does_not_run_web_when_local_substitutes_exist(enabled, monkeypat
     assert "Penciclav 500 mg/125 mg Tablet" in result["substitutes"]
     assert "web_alternatives" not in result
     assert result["requires_review"] is True
+    assert result["alternatives_lookup"]["skipped_reason"] == "local_candidates_present"
+    assert result["alternatives_lookup"]["web_ran"] is False
 
 
 def test_attach_sets_review_flags_without_substitutes(enabled, monkeypatch):
@@ -274,6 +276,19 @@ def test_attach_sets_review_flags_without_substitutes(enabled, monkeypatch):
     assert result["web_alternatives"]
     assert result["requires_review"] is True
     assert any("must be verified" in reason for reason in result["review_reasons"])
+    assert result["alternatives_lookup"]["skipped_reason"] == ""
+    assert result["alternatives_lookup"]["web_ran"] is True
+
+
+def test_attach_records_disabled_web_lookup(monkeypatch):
+    monkeypatch.setattr("simpliscribe.alternatives.settings", DISABLED_SETTINGS)
+    monkeypatch.setattr(alternatives, "dataset_reference_candidates", lambda *_args, **_kwargs: [])
+    result = attach_alternative_candidates({"name": "UnknownBrandXYZ", "substitutes": []})
+    assert "web_alternatives" not in result
+    assert result["alternatives_lookup"]["skipped_reason"] == "lookup_disabled"
+    assert result["alternatives_lookup"]["web_enabled"] is False
+    assert result["alternatives_lookup"]["web_ran"] is False
+    assert result["alternatives_lookup"]["web_count"] == 0
 
 
 def test_only_medicine_name_is_sent_off_box(enabled, monkeypatch):
@@ -350,3 +365,13 @@ def test_attach_fills_local_peers_even_when_web_is_disabled(monkeypatch):
     result = attach_alternative_candidates({"name": "Listed Brand", "substitutes": [], "review_reasons": []})
     assert "Other Brand Tablet" in result["substitutes"]
     assert "web_alternatives" not in result
+    assert result["alternatives_lookup"]["skipped_reason"] == "local_candidates_present"
+
+
+def test_attach_records_disabled_web_lookup_when_local_list_empty(monkeypatch):
+    monkeypatch.setattr("simpliscribe.alternatives.settings", DISABLED_SETTINGS)
+    monkeypatch.setattr(alternatives, "dataset_reference_candidates", lambda *args, **kwargs: [])
+    result = attach_alternative_candidates({"name": "UnknownBrand", "substitutes": [], "review_reasons": []})
+    assert "web_alternatives" not in result
+    assert result["alternatives_lookup"]["web_enabled"] is False
+    assert result["alternatives_lookup"]["skipped_reason"] == "lookup_disabled"

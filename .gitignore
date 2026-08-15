@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
 .playwright-cli/
 tmp/
 .venv/
@@ -17,3 +18,7 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/benchmark_runs/
+data/coverage.xml
+.coverage
+coverage.xml
+htmlcov/

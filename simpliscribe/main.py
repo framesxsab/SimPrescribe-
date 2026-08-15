@@ -37,6 +37,16 @@ def _rate_limit_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _login_page_context(request: Request, error: str = "") -> dict[str, object]:
+    return {
+        "app_name": settings.app_name,
+        "csrf_token": csrf_token(request),
+        "error": error,
+        "oidc_enabled": settings.oidc_enabled,
+        "bootstrap_admin_enabled": settings.bootstrap_admin_enabled,
+    }
+
+
 def _consume_bucket(buckets: dict[str, deque[float]], key: str, now: float, window: float, limit: int) -> bool:
     if key not in buckets and len(buckets) >= _MAX_BUCKETS:
         buckets.pop(next(iter(buckets)))
@@ -108,23 +118,24 @@ async def health() -> dict:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "", "oidc_enabled": settings.oidc_enabled})
+    return templates.TemplateResponse(request, "login.html", _login_page_context(request))
 
 
 @app.post("/login", response_class=HTMLResponse)
 async def login(request: Request, email: str = Form(...), password: str = Form(...), csrf: str = Form(...)):
-    if settings.oidc_enabled:
+    if settings.oidc_enabled and not settings.bootstrap_admin_enabled:
         raise HTTPException(status_code=404, detail="Use organization sign-in.")
     verify_csrf(request, csrf)
     if not _consume_bucket(_login_times, _rate_limit_key(request), time.monotonic(), 60, 20):
-        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "Too many login attempts. Try again later.", "oidc_enabled": settings.oidc_enabled}, status_code=429)
+        return templates.TemplateResponse(request, "login.html", _login_page_context(request, "Too many login attempts. Try again later."), status_code=429)
     user = authenticate(email, password)
     if user is None:
-        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "Invalid email or password.", "oidc_enabled": settings.oidc_enabled}, status_code=401)
+        return templates.TemplateResponse(request, "login.html", _login_page_context(request, "Invalid email or password."), status_code=401)
     request.session.clear()
     request.session["user"] = user
     csrf_token(request)
-    append_audit_event(str(uuid.uuid4()), user["id"], "login_succeeded")
+    method = "bootstrap" if settings.oidc_enabled else "password"
+    append_audit_event(str(uuid.uuid4()), user["id"], "login_succeeded", method=method)
     return RedirectResponse("/", status_code=303)
 
 
@@ -136,11 +147,11 @@ async def login_oidc(request: Request):
 @app.get("/auth/callback", response_class=HTMLResponse)
 async def oidc_callback(request: Request, state: str = "", code: str = "", error: str = ""):
     if error:
-        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": "Organization sign-in was not completed.", "oidc_enabled": settings.oidc_enabled}, status_code=401)
+        return templates.TemplateResponse(request, "login.html", _login_page_context(request, "Organization sign-in was not completed."), status_code=401)
     try:
         user = await authenticate_oidc_callback(request, state, code)
     except HTTPException as exc:
-        return templates.TemplateResponse(request, "login.html", {"app_name": settings.app_name, "csrf_token": csrf_token(request), "error": exc.detail, "oidc_enabled": settings.oidc_enabled}, status_code=exc.status_code)
+        return templates.TemplateResponse(request, "login.html", _login_page_context(request, exc.detail), status_code=exc.status_code)
     request.session.clear()
     request.session["user"] = user
     csrf_token(request)

@@ -26,10 +26,18 @@ jobs:
           else
             git diff --check "$BASE_SHA...$HEAD_SHA"
           fi
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Ruff check baseline
+        run: ruff check app.py simpliscribe tests
       - name: Check ASGI entrypoint
         run: python -c "from app import app; assert app.title"
-      - run: pytest -q
+      - name: Pytest with coverage report
+        run: pytest -q --cov=simpliscribe --cov-report=term --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-xml
+          path: coverage.xml
       - name: Verify Alembic migrations
         env:
           APP_ENV: development
@@ -44,3 +52,63 @@ jobs:
           --output data/benchmark_runs/ci.json
           --min-f1 0.85
           --max-hallucination-rate 0.10
+
+  docker-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: simpliscribe:ci
+          build-args: PRELOAD_OCR=0
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+  postgres-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: simpliscribe
+          POSTGRES_PASSWORD: simpliscribe
+          POSTGRES_DB: simpliscribe_source
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U simpliscribe -d simpliscribe_source"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://simpliscribe:simpliscribe@localhost:5432/simpliscribe_source
+      PGHOST: localhost
+      PGUSER: simpliscribe
+      PGPASSWORD: simpliscribe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install migration and client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          pip install "alembic==1.19.1" "SQLAlchemy==2.0.51" "psycopg[binary]==3.3.4" "python-dotenv==1.2.2"
+      - name: Create disposable restore database
+        run: psql -d postgres -c "CREATE DATABASE simpliscribe_restore_test;"
+      - name: Apply Alembic to source database
+        run: alembic upgrade head
+      - name: Verify dump and restore against disposable target
+        run: |
+          chmod +x scripts/verify-postgres-recovery.sh
+          scripts/verify-postgres-recovery.sh \
+            --source-url "$DATABASE_URL" \
+            --restore-url "postgresql://simpliscribe:simpliscribe@localhost:5432/simpliscribe_restore_test" \
+            --backup-path "$RUNNER_TEMP/simpliscribe-ci.dump"

@@ -20,23 +20,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /app/.paddleocr && python - <<'PY'
-from paddleocr import PaddleOCR
-
-for kwargs in (
-    {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True, 'show_log': False},
-    {'lang': 'en', 'device': 'cpu', 'use_textline_orientation': True},
-    {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False, 'show_log': False},
-    {'lang': 'en', 'use_angle_cls': True, 'use_gpu': False}
-):
-    try:
-        PaddleOCR(**kwargs)
-        break
-    except (TypeError, ValueError):
-        pass
-
-print("PaddleOCR models ready")
-PY
+COPY scripts/preload_ocr.py /tmp/preload_ocr.py
+ARG PRELOAD_OCR=1
+RUN mkdir -p /app/.paddleocr && \
+    if [ "$PRELOAD_OCR" = "1" ]; then python /tmp/preload_ocr.py; \
+    else echo "Skipping OCR model preload"; fi
 
 COPY . .
 

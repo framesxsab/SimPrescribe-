@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from simpliscribe.benchmark import load_cases
 from simpliscribe.benchmark import load_case_bundle
+from simpliscribe.benchmark import merge_case_bundles
 from simpliscribe.benchmark import evaluate_quality_gates
 from simpliscribe.benchmark import run_case
 from simpliscribe.benchmark import run_benchmark
@@ -311,6 +314,48 @@ def test_load_versioned_golden_bundle(tmp_path):
     assert metadata["schema_version"] == "1.0"
     assert metadata["dataset"] == "test-set"
     assert cases[0]["id"] == "case-1"
+
+
+def test_clinician_golden_placeholder_is_add_only_and_empty():
+    path = Path(__file__).resolve().parents[1] / "data" / "golden_cases.clinician.v1.json"
+    metadata, cases = load_case_bundle(path)
+    synthetic, synthetic_cases = load_case_bundle(
+        Path(__file__).resolve().parents[1] / "data" / "golden_cases.v1.json"
+    )
+
+    assert metadata["schema_version"] == "1.0"
+    assert metadata["adjudication"] == "none"
+    assert cases == []
+    merged_metadata, merged_cases = merge_case_bundles((synthetic, synthetic_cases), (metadata, cases))
+    assert merged_cases == synthetic_cases
+    assert "extra_dataset" not in merged_metadata
+
+
+def test_merge_case_bundles_appends_clinician_cases_without_replacing_synthetic(tmp_path):
+    extra_path = tmp_path / "clinician.json"
+    extra_path.write_text(
+        '{"schema_version":"1.0","dataset":"clinician","cases":['
+        '{"id":"clinician-1","expected_medications":[]}]}',
+        encoding="utf-8",
+    )
+    primary = (
+        {"schema_version": "1.0", "dataset": "synthetic"},
+        [{"id": "synthetic-1", "expected_medications": []}],
+    )
+
+    metadata, cases = merge_case_bundles(primary, load_case_bundle(extra_path))
+
+    assert [case["id"] for case in cases] == ["synthetic-1", "clinician-1"]
+    assert metadata["dataset"] == "synthetic"
+    assert metadata["extra_dataset"] == "clinician"
+
+
+def test_merge_case_bundles_rejects_overlapping_ids():
+    with pytest.raises(ValueError, match="Duplicate benchmark case id"):
+        merge_case_bundles(
+            ({"dataset": "synthetic"}, [{"id": "shared", "expected_medications": []}]),
+            ({"dataset": "clinician"}, [{"id": "shared", "expected_medications": []}]),
+        )
 
 
 def test_load_versioned_golden_bundle_rejects_duplicate_ids(tmp_path):

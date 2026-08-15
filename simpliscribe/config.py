@@ -7,6 +7,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _csv_set(value: str) -> set[str]:
+    return {item.strip() for item in value.split(",") if item.strip()}
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.environ.get("APP_NAME", "SimpliScribe")
@@ -83,9 +87,12 @@ class Settings:
         return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret and self.oidc_redirect_uri)
 
     @property
+    def bootstrap_admin_enabled(self) -> bool:
+        return bool(self.admin_password and self.admin_email.strip())
+
+    @property
     def oidc_subject_roles(self) -> tuple[set[str], set[str]]:
-        parse = lambda value: {item.strip() for item in value.split(",") if item.strip()}
-        return parse(self.oidc_admin_subjects), parse(self.oidc_reviewer_subjects)
+        return _csv_set(self.oidc_admin_subjects), _csv_set(self.oidc_reviewer_subjects)
 
     @property
     def secure_transport(self) -> bool:

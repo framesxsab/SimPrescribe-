@@ -82,6 +82,15 @@ def test_dashboard_route():
     assert response.status_code == 200
     assert 'href="/static/favicon.svg"' in response.text
     assert client.get("/static/favicon.svg").status_code == 200
+    assert 'id="processing-overlay"' in response.text
+    assert 'id="analyze-error"' in response.text
+    assert 'id="pipeline-status"' in response.text
+    assert 'id="processing-consent"' in response.text
+    assert "med-local-alts" in response.text
+    assert "med-web-alts" in response.text
+    assert "SimpliScribeUI" in client.get("/static/workspace.js").text
+    assert client.get("/static/workspace.js").status_code == 200
+    assert client.get("/static/workspace.css").status_code == 200
 
 
 def test_history_api_route():
@@ -227,6 +236,70 @@ def test_production_configuration_accepts_complete_oidc_without_bootstrap_passwo
         oidc_client_secret="secret",
         oidc_redirect_uri="https://app.example.test/auth/callback",
     ).validate_runtime()
+
+
+def test_bootstrap_admin_remains_available_when_oidc_is_configured():
+    original = (
+        settings.oidc_issuer,
+        settings.oidc_client_id,
+        settings.oidc_client_secret,
+        settings.oidc_redirect_uri,
+        settings.admin_email,
+        settings.admin_password,
+    )
+    object.__setattr__(settings, "oidc_issuer", "https://identity.example.test")
+    object.__setattr__(settings, "oidc_client_id", "simpliscribe")
+    object.__setattr__(settings, "oidc_client_secret", "secret")
+    object.__setattr__(settings, "oidc_redirect_uri", "https://app.example.test/auth/callback")
+    object.__setattr__(settings, "admin_email", "admin@localhost")
+    object.__setattr__(settings, "admin_password", "bootstrap-secret")
+    oidc_client = TestClient(app)
+    try:
+        login_page = oidc_client.get("/login")
+        assert "Continue with organization sign-in" in login_page.text
+        assert "Emergency bootstrap account" in login_page.text
+        response = oidc_client.post(
+            "/login",
+            data={"email": "admin@localhost", "password": "bootstrap-secret", "csrf": csrf_for(oidc_client)},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert oidc_client.get("/").status_code == 200
+    finally:
+        object.__setattr__(settings, "oidc_issuer", original[0])
+        object.__setattr__(settings, "oidc_client_id", original[1])
+        object.__setattr__(settings, "oidc_client_secret", original[2])
+        object.__setattr__(settings, "oidc_redirect_uri", original[3])
+        object.__setattr__(settings, "admin_email", original[4])
+        object.__setattr__(settings, "admin_password", original[5])
+
+
+def test_oidc_without_bootstrap_password_rejects_password_login():
+    original = (
+        settings.oidc_issuer,
+        settings.oidc_client_id,
+        settings.oidc_client_secret,
+        settings.oidc_redirect_uri,
+        settings.admin_password,
+    )
+    object.__setattr__(settings, "oidc_issuer", "https://identity.example.test")
+    object.__setattr__(settings, "oidc_client_id", "simpliscribe")
+    object.__setattr__(settings, "oidc_client_secret", "secret")
+    object.__setattr__(settings, "oidc_redirect_uri", "https://app.example.test/auth/callback")
+    object.__setattr__(settings, "admin_password", "")
+    oidc_client = TestClient(app)
+    try:
+        login_page = oidc_client.get("/login")
+        assert "Continue with organization sign-in" in login_page.text
+        assert "Emergency bootstrap account" not in login_page.text
+        response = oidc_client.post("/login", data={"email": "admin@localhost", "password": "x", "csrf": "x"})
+        assert response.status_code == 404
+    finally:
+        object.__setattr__(settings, "oidc_issuer", original[0])
+        object.__setattr__(settings, "oidc_client_id", original[1])
+        object.__setattr__(settings, "oidc_client_secret", original[2])
+        object.__setattr__(settings, "oidc_redirect_uri", original[3])
+        object.__setattr__(settings, "admin_password", original[4])
 
 
 def test_runtime_configuration_rejects_partial_oidc_setup():

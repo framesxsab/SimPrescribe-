@@ -68,15 +68,16 @@ async def oidc_authorization_url(request: Request) -> str:
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     request.session["oidc"] = {"state": state, "verifier": verifier}
-    return f"{configuration['authorization_endpoint']}?{urlencode({
-        'response_type': 'code',
-        'client_id': settings.oidc_client_id,
-        'redirect_uri': settings.oidc_redirect_uri,
-        'scope': 'openid profile email',
-        'state': state,
-        'code_challenge': challenge,
-        'code_challenge_method': 'S256',
-    })}"
+    query = urlencode({
+        "response_type": "code",
+        "client_id": settings.oidc_client_id,
+        "redirect_uri": settings.oidc_redirect_uri,
+        "scope": "openid profile email",
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    })
+    return f"{configuration['authorization_endpoint']}?{query}"
 
 
 def oidc_user_from_claims(claims: dict[str, Any]) -> dict[str, str]:

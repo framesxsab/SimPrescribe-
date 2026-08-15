@@ -1,0 +1,19 @@
+body { font-family: Inter, sans-serif; }
+.text-primary { color: #0f766e; }
+.bg-primary { background-color: #0f766e; }
+.hover\:text-primary:hover { color: #0f766e; }
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: #0f766e;
+  color: #fff;
+}
+.skip-link:focus { left: 0.75rem; top: 0.75rem; }
+[aria-busy="true"] { cursor: progress; }
+@media print {
+  header, .no-print { display: none !important; }
+  body { background: #fff; }
+}

@@ -7,27 +7,16 @@
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml"/>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <link rel="stylesheet" href="/static/workspace.css"/>
     <style>
         body { font-family: 'Inter', sans-serif; }
     </style>
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-900">
-    <header class="border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-20">
-        <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-            <a href="/" class="text-xl font-bold tracking-tight text-slate-900">{{ app_name }}</a>
-            <nav class="flex items-center gap-6 text-sm font-semibold">
-                <a href="/" class="text-slate-500 hover:text-slate-900">Dashboard</a>
-                <a href="/history" class="text-primary-700 text-slate-900">History</a>
-            </nav>
-            {% if user %}
-            <form method="post" action="/logout">
-                <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                <button type="submit" class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:border-slate-400">Sign out</button>
-            </form>
-            {% endif %}
-        </div>
-    </header>
-    <main class="max-w-6xl mx-auto px-6 py-10">
+    {% set current = 'history' %}
+    {% include "partials/nav.html" %}
+    <main id="main-content" class="max-w-6xl mx-auto px-6 py-10">
         <div class="flex items-end justify-between gap-4 mb-8">
             <div>
                 <p class="text-sm uppercase tracking-[0.12em] text-slate-500 font-semibold">Saved analyses</p>
@@ -79,16 +68,22 @@
                             {% endif %}
                             <span class="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">{{ analysis.medications|length }} meds</span>
                             <span class="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
-                                {% set sources = [] %}
+                                {% set ns = namespace(sources=[]) %}
                                 {% for med in analysis.medications %}
                                     {% for source in med.source_datasets or [] %}
-                                        {% if source not in sources %}
-                                            {% set _ = sources.append(source) %}
+                                        {% if source not in ns.sources %}
+                                            {% set ns.sources = ns.sources + [source] %}
                                         {% endif %}
                                     {% endfor %}
                                 {% endfor %}
-                                {{ sources|length or 0 }} data source{% if (sources|length or 0) != 1 %}s{% endif %}
+                                {{ ns.sources|length }} data source{% if ns.sources|length != 1 %}s{% endif %}
                             </span>
+                            {% if analysis.pipeline and analysis.pipeline.degraded %}
+                            <span class="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-800">Degraded</span>
+                            {% endif %}
+                            {% if analysis.pipeline and analysis.pipeline.used_provider %}
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">{{ analysis.pipeline.used_provider }}</span>
+                            {% endif %}
                             <a href="/details/{{ analysis.id }}" class="inline-flex items-center justify-center rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 hover:border-slate-900 hover:text-slate-900">
                                 View Details
                             </a>
@@ -125,6 +120,10 @@
                                             {% for item in med.substitutes[:3] %}
                                             <span class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{{ item }}</span>
                                             {% endfor %}
+                                        {% elif med.alternatives_lookup and med.alternatives_lookup.skipped_reason == 'lookup_disabled' %}
+                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">Local list empty. Web/model lookup is off.</span>
+                                        {% elif med.alternatives_lookup and med.alternatives_lookup.skipped_reason == 'no_validated_candidates' %}
+                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No validated web/model candidates</span>
                                         {% else %}
                                             <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No dataset reference candidates</span>
                                         {% endif %}

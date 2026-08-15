@@ -79,6 +79,49 @@ def test_build_pdf_report_renders_web_alternatives_row():
     assert "VERIFIED BY A PRESCRIBER" in normalized
 
 
+def test_build_pdf_report_explains_disabled_web_lookup():
+    import re
+    import fitz
+
+    analysis = {
+        "id": "report-disabled",
+        "patient_name": "N/A",
+        "doctor_name": "N/A",
+        "date": "N/A",
+        "pipeline": {"requested_provider": "huggingface", "used_provider": "fallback", "degraded": True, "error_code": "PROVIDER_FAILED"},
+        "medications": [
+            {
+                "name": "Imaginarin",
+                "type": "Tablet",
+                "dosage": "25 mg",
+                "frequency": "twice daily",
+                "duration": "7 days",
+                "requires_review": True,
+                "substitutes": [],
+                "web_alternatives": [],
+                "alternatives_lookup": {
+                    "local_count": 0,
+                    "web_enabled": False,
+                    "web_ran": False,
+                    "web_count": 0,
+                    "skipped_reason": "lookup_disabled",
+                },
+            }
+        ],
+    }
+    pdf_bytes = build_pdf_report(analysis, "SimpliScribe")
+    document = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        text = " ".join(page.get_text() for page in document)
+    finally:
+        document.close()
+    normalized = re.sub(r"\s+", " ", text).upper()
+    assert "WEB/MODEL LOOKUP WAS OFF" in normalized
+    assert "USED PROVIDER" in normalized
+    assert "FALLBACK" in normalized
+    assert "PROVIDER_FAILED" in normalized
+
+
 def test_paragraph_escapes_html():
     from io import BytesIO
 

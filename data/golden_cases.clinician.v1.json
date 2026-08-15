@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "dataset": "simpliscribe-clinician-golden-v1",
+  "provenance": "Placeholder for de-identified, consented, clinician-adjudicated cases. Add cases to this file only. Never replace or rewrite data/golden_cases.v1.json.",
+  "adjudication": "none",
+  "created_at": "2026-08-14",
+  "cases": []
+}

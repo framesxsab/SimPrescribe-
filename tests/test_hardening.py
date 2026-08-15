@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from simpliscribe import main as main_module
 from simpliscribe.alternatives import _cache, _cache_set
+from simpliscribe.config import settings
 from simpliscribe.local_model_server import app as model_server_app
 from simpliscribe.security import authenticate_oidc_callback
 
@@ -99,9 +100,6 @@ def _jwt(payload: dict) -> str:
 
 
 def test_oidc_callback_rejects_id_token_with_wrong_audience(monkeypatch):
-    from simpliscribe import security as security_module
-    from simpliscribe.config import settings
-
     original = (
         settings.oidc_issuer,
         settings.oidc_client_id,
