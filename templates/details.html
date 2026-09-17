@@ -28,8 +28,9 @@
     {% set current = 'details' %}
     {% include "partials/nav.html" %}
     <main id="main-content" class="max-w-7xl mx-auto px-6 py-10">
-        <div class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
-            <strong>Human review required.</strong> Compare this extraction with the original prescription. Reference candidates are not recommendations and must not be substituted without a prescriber or pharmacist.
+      <div class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+        <strong>Human review required.</strong> Compare this extraction with the original prescription. Reference candidates are not recommendations and must not be substituted without a prescriber or pharmacist.
+        {% if user and user.role == 'patient' and analysis.patient_review_status in ['confirmed','corrected'] %}<span class="ml-1 font-bold text-teal-800">Patient confirmation recorded; pharmacist verification is still required.</span>{% endif %}
             {% set pipeline = analysis.pipeline or {} %}
             {% if pipeline.used_provider or pipeline.degraded or pipeline.error_code or pipeline.cached_vector_match %}
             <p class="mt-2 text-xs text-amber-800 flex flex-wrap items-center gap-2">
@@ -259,6 +260,19 @@
 
             <!-- Sidebar -->
             <aside class="space-y-5 no-print">
+                {% if show_patient_marketplace %}
+                <section id="medicine-marketplace" class="rounded-2xl border border-teal-200 bg-teal-50 p-5 shadow-sm">
+                    <h2 class="text-sm font-bold text-slate-900">Confirm your prescription</h2>
+                    <p class="mt-2 text-xs leading-5 text-slate-600">Compare each field with the original. Your edits are recorded as patient-entered and must still be verified by a pharmacist.</p>
+                    <div id="patient-review-medications" class="mt-4 space-y-4">{% for med in analysis.medications %}<fieldset class="rounded-xl border border-teal-200 bg-white p-3" data-index="{{ loop.index0 }}"><legend class="px-1 text-xs font-bold text-teal-800">Medicine {{ loop.index }}</legend>{% for field in ['name','type','dosage','frequency','duration'] %}<label class="mt-2 block text-[10px] font-bold uppercase text-slate-500">{{ field }}<input data-field="{{ field }}" value="{{ med[field] or '' }}" class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs normal-case"></label>{% endfor %}<label class="mt-3 block text-xs"><input type="checkbox" data-generic-inquiry> Ask the pharmacist about generic information</label></fieldset>{% endfor %}</div>
+                    <div class="mt-4 grid grid-cols-2 gap-2"><button type="button" data-patient-status="confirmed" class="rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white">Confirm unchanged</button><button type="button" data-patient-status="corrected" class="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white">Save edits and confirm</button></div>
+                    <button id="find-pharmacies" type="button" class="mt-3 w-full rounded-lg border border-teal-700 px-3 py-2 text-xs font-bold text-teal-800 {% if analysis.patient_review_status not in ['confirmed','corrected'] %}hidden{% endif %}">Find pharmacies serving my PIN</button>
+                    {% if not user %}
+                    <p class="mt-3 text-xs text-slate-600">To place an order, <a href="/login" class="font-bold text-teal-700 hover:underline">sign in</a> or <a href="/register/patient" class="font-bold text-teal-700 hover:underline">register</a> as a patient.</p>
+                    {% endif %}
+                    <p id="patient-message" class="mt-3 text-xs font-semibold" role="status"></p><div id="pharmacy-results" class="mt-4 space-y-3"></div>
+                </section>
+                {% endif %}
                 {% if can_edit %}
                 <section class="rounded-2xl border border-teal-200 bg-teal-50 p-5 shadow-sm">
                     <h2 class="text-sm font-bold text-slate-900">Human review</h2>
@@ -282,7 +296,7 @@
                         <button type="button" data-review-status="rejected" class="col-span-2 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-bold text-red-700">Reject as unreadable</button>
                     </div>
                 </section>
-                {% else %}
+                {% elif user and user.role == 'auditor' %}
                 <section class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-xs leading-5 text-amber-900">Auditor access is read-only. A reviewer must record corrections and outcomes.</section>
                 {% endif %}
                 {% if analysis.raw_text %}
@@ -326,6 +340,30 @@
     </main>
     <script src="/static/workspace.js"></script>
     <script>
+      const patientMessage = document.getElementById('patient-message');
+      const patientRows = () => [...document.querySelectorAll('#patient-review-medications [data-index]')];
+      document.querySelectorAll('[data-patient-status]').forEach(button => button.addEventListener('click', async () => {
+        const medications = patientRows().map(row => Object.fromEntries([...row.querySelectorAll('[data-field]')].map(input => [input.dataset.field, input.value])));
+        const response = await fetch('/api/analyses/{{ analysis.id }}/patient-review', {method:'PATCH', headers:{'Content-Type':'application/json','X-CSRF-Token':'{{ csrf_token }}'}, body:JSON.stringify({status:button.dataset.patientStatus, medications})});
+        const payload = await response.json(); if (!response.ok) { patientMessage.textContent = payload.detail || 'Confirmation failed.'; return; }
+        patientMessage.textContent = 'Prescription confirmed. You can now find local pharmacies.'; document.getElementById('find-pharmacies').classList.remove('hidden');
+      }));
+      document.getElementById('find-pharmacies')?.addEventListener('click', async () => {
+        const response = await fetch('/api/analyses/{{ analysis.id }}/pharmacies'), payload = await response.json();
+        if (!response.ok) { patientMessage.textContent = payload.detail || 'Could not find pharmacies.'; return; }
+        const target = document.getElementById('pharmacy-results'); target.replaceChildren();
+        payload.pharmacies.forEach(pharmacy => { const card=document.createElement('div'); card.className='rounded-xl border border-teal-200 bg-white p-3 text-xs';
+          const title=document.createElement('p'); title.className='font-bold text-sm'; title.textContent=pharmacy.business_name; card.append(title);
+          const availability=document.createElement('p'); availability.className='mt-1 text-slate-600'; availability.textContent=`${pharmacy.available_count}/${pharmacy.availability.length} exact-name items currently listed · ${pharmacy.exact_pin?'Same PIN':'Serves your PIN'}`; card.append(availability);
+          const mode=document.createElement('select'); mode.className='mt-2 w-full rounded-lg border p-2'; if(pharmacy.supports_pickup)mode.add(new Option('Pickup','pickup')); if(pharmacy.supports_delivery)mode.add(new Option('Local delivery','delivery')); card.append(mode);
+          const address=document.createElement('textarea'); address.className='mt-2 hidden w-full rounded-lg border p-2'; address.placeholder='Delivery address'; mode.addEventListener('change',()=>address.classList.toggle('hidden',mode.value!=='delivery')); card.append(address);
+          const order=document.createElement('button'); order.className='mt-2 w-full rounded-lg bg-teal-700 px-3 py-2 font-bold text-white'; order.textContent='Request pharmacist quote'; order.addEventListener('click',async()=>{const generic_inquiries=patientRows().filter(r=>r.querySelector('[data-generic-inquiry]').checked).map(r=>Number(r.dataset.index)); const r=await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'{{ csrf_token }}'},body:JSON.stringify({analysis_id:'{{ analysis.id }}',pharmacy_id:pharmacy.id,fulfillment_mode:mode.value,delivery_address:address.value,generic_inquiries})}),p=await r.json(); if(!r.ok){patientMessage.textContent=p.detail||'Order request failed.';return}location.href=`/orders/${p.id}`}); card.append(order); target.append(card); });
+        if (!payload.pharmacies.length) patientMessage.textContent='No approved pharmacy currently serves your PIN.';
+      });
+      if (location.hash === '#medicine-marketplace') {
+        const findButton = document.getElementById('find-pharmacies');
+        if (findButton && !findButton.classList.contains('hidden')) findButton.click();
+      }
       document.querySelectorAll('[data-review-status]').forEach((button) => {
         button.addEventListener('click', async () => {
           const medications = [...document.querySelectorAll('[data-medication-index]')].map((group) => {

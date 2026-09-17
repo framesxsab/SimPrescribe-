@@ -6,10 +6,12 @@ __pycache__/
 .ruff_cache/
 .playwright-cli/
 tmp/
+tmp/ocr-cache/
 .venv/
 archive (3)/
 synthetic_prescription_dataset/
 uploads/*
+data/prescriptions/
 data/*.jpg
 data/*.jpeg
 data/*.png

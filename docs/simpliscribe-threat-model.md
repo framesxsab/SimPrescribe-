@@ -1,6 +1,6 @@
 # SimpliScribe threat model
 
-Assumptions (operator should confirm): private authenticated deployment behind TLS; not a public Hugging Face Space; identifiable prescriptions only after consent/retention review; no Redis, no commercial drug APIs, no multi-tenant product beyond `owner_id`.
+Assumptions (operator should confirm): authenticated deployment behind TLS; encrypted-at-rest private prescription storage; identifiable prescriptions only after consent/retention review; no Redis or commercial drug APIs.
 
 Out of scope: diagnosis, prescribing, medication reminders, interaction decisioning, identity-provider availability, disaster-region recovery.
 
@@ -10,7 +10,8 @@ Runtime is a FastAPI app (`simpliscribe/main.py`, ASGI export `app:app`) with Pa
 
 ```mermaid
 flowchart TD
-  reviewer["Reviewer browser"]
+  patient["Patient browser"]
+  pharmacy["Approved pharmacy browser"]
   proxy["TLS reverse proxy"]
   app["FastAPI app"]
   db["PostgreSQL"]
@@ -19,7 +20,8 @@ flowchart TD
   idp["OIDC identity provider"]
   web["Optional web search"]
 
-  reviewer -->|HTTPS session CSRF upload| proxy
+  patient -->|HTTPS session CSRF upload/order| proxy
+  pharmacy -->|HTTPS inventory/quote/fulfillment| proxy
   proxy --> app
   app --> db
   app --> ocr
@@ -34,7 +36,7 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | Browser to app | Credentials, uploads, reviews | HTTPS via proxy; cookies | Session middleware, CSRF, CSP/HSTS in production, login and analysis rate limits | `simpliscribe/main.py` middleware and `_consume_bucket` |
 | App to database | Analysis JSON, audit rows | SQLAlchemy URL | Production requires PostgreSQL; queries use bound parameters; history filtered by `owner_id` | `simpliscribe/config.py` `validate_runtime`; `simpliscribe/storage.py` |
-| App to OCR/parsers | Image/PDF bytes | Local files | Extension allow-list, size/page/pixel limits, content validation, unlink after use | `simpliscribe/web.py` `save_upload`; `simpliscribe/ocr.py` |
+| App to OCR/private storage | Image/PDF bytes | Private files | Extension allow-list, size/page/pixel limits, content validation, generated names, protected download authorization, 30-day expiry | `simpliscribe/web.py`; `prescription_files` |
 | App to IdP | Auth code, PKCE, ID token | HTTPS | Discovery HTTPS check, PKCE, audience check, least-privilege role map | `simpliscribe/security.py` |
 | App to model/web | OCR text or canonical medicine name | HTTPS | Alternatives fail-closed (`ALTERNATIVES_ENABLED`); only name sent for web/model; local CSV validation | `simpliscribe/alternatives.py`; `simpliscribe/inference.py` |
 
@@ -43,6 +45,7 @@ flowchart TD
 - Prescription images in transit and OCR text at rest in `analyses.payload`
 - Session secret, OIDC client secret, bootstrap password, database URL
 - Review integrity (versioned medication state)
+- Pharmacy licence approval, inventory integrity, quote integrity, and order-state history
 - Local medicine CSVs (integrity of reference names, not clinical truth)
 
 ## Abuse paths
@@ -58,12 +61,15 @@ flowchart TD
 | T7 | Rate-limit bypass via spoofed `X-Forwarded-For` | High if `TRUST_PROXY_HEADERS=true` without stripping | Medium | Medium | Flag defaults false |
 | T8 | Restore drill pointed at production | Medium (ops error) | High | High | Script refuses same target and names without restore/verify/test |
 | T9 | Public Space upload of identifiable prescriptions | High if deployed public | High | High | README forbids public HF Space uploads |
+| T10 | Fake pharmacy reads prescriptions | Medium without approval | High | High | Pharmacy accounts are pending until admin approval; source access also requires a selected order |
+| T11 | Inventory race oversells medicine | Medium | Medium | High | Quote acceptance rechecks and decrements stock in one transaction; stale quotes return for requote |
+| T12 | Patient edit is mistaken for OCR or pharmacist evidence | Medium | High | High | Original medication snapshot and patient edit versions are retained and labeled separately |
 
 ## Existing mitigations
 
 - Production fail-closed: session secret length, PostgreSQL, HTTPS OIDC, optional bootstrap if OIDC complete
-- Role map: admin/reviewer/auditor; edit routes `require_edit_role`
-- Upload deleted after processing; analyses expire via `RETENTION_DAYS`
+- Role map: patient/pharmacy/admin/reviewer/auditor with route-specific guards; pharmacy access requires approval
+- Processing upload deleted after OCR; protected source and analyses expire via `RETENTION_DAYS`; orders use `ORDER_RETENTION_DAYS`
 - Degraded pipeline returns labeled payloads or error codes instead of silent partials
 - Recovery verifier guards in `scripts/verify-postgres-recovery.ps1` and `.sh`
 

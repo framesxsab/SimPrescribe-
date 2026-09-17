@@ -1,8 +1,11 @@
+import os
 from math import ceil
 from pathlib import Path
 from threading import Lock
 from typing import Any
 from dataclasses import dataclass
+
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
 import fitz
 from PIL import Image
@@ -76,6 +79,40 @@ def _collect_paddle_text(results: Any) -> list[str]:
     return [line.text for line in _collect_paddle_lines(results)]
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def _paddle_runtime_environment():
+    cache_dir = Path(getattr(settings, "ocr_cache_dir", Path("tmp/ocr-cache")))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    paddle_home = Path(getattr(settings, "paddle_home", cache_dir / "paddle"))
+    paddle_home.mkdir(parents=True, exist_ok=True)
+    paddlex_cache = Path(getattr(settings, "paddlex_cache_home", cache_dir / "paddlex"))
+    paddlex_cache.mkdir(parents=True, exist_ok=True)
+
+    previous = {
+        "USERPROFILE": os.environ.get("USERPROFILE"),
+        "HOME": os.environ.get("HOME"),
+        "PADDLE_HOME": os.environ.get("PADDLE_HOME"),
+        "PADDLE_PDX_CACHE_HOME": os.environ.get("PADDLE_PDX_CACHE_HOME"),
+        "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK": os.environ.get("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"),
+    }
+    try:
+        os.environ["USERPROFILE"] = str(cache_dir)
+        os.environ["HOME"] = str(cache_dir)
+        os.environ["PADDLE_HOME"] = str(paddle_home)
+        os.environ["PADDLE_PDX_CACHE_HOME"] = str(paddlex_cache)
+        os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def get_ocr_reader() -> Any:
     global _ocr_reader
     if _ocr_reader is not None:
@@ -96,40 +133,41 @@ def get_ocr_reader() -> Any:
         reader = None
         init_errors: list[Exception] = []
 
-        # PaddleOCR v3 dropped use_gpu/use_angle_cls in favor of device/use_textline_orientation.
-        for kwargs in (
-            {
-                "lang": settings.ocr_language,
-                "device": "gpu" if settings.ocr_use_gpu else "cpu",
-                "enable_mkldnn": False,
-                "use_textline_orientation": True,
-                "show_log": False,
-            },
-            {
-                "lang": settings.ocr_language,
-                "device": "gpu" if settings.ocr_use_gpu else "cpu",
-                "enable_mkldnn": False,
-                "use_textline_orientation": True,
-            },
-            {
-                "lang": settings.ocr_language,
-                "enable_mkldnn": False,
-                "use_angle_cls": True,
-                "use_gpu": settings.ocr_use_gpu,
-                "show_log": False,
-            },
-            {
-                "lang": settings.ocr_language,
-                "enable_mkldnn": False,
-                "use_angle_cls": True,
-                "use_gpu": settings.ocr_use_gpu,
-            },
-        ):
-            try:
-                reader = PaddleOCR(**kwargs)
-                break
-            except (TypeError, ValueError) as exc:
-                init_errors.append(exc)
+        with _paddle_runtime_environment():
+            # PaddleOCR v3 dropped use_gpu/use_angle_cls in favor of device/use_textline_orientation.
+            for kwargs in (
+                {
+                    "lang": settings.ocr_language,
+                    "device": "gpu" if settings.ocr_use_gpu else "cpu",
+                    "enable_mkldnn": False,
+                    "use_textline_orientation": True,
+                    "show_log": False,
+                },
+                {
+                    "lang": settings.ocr_language,
+                    "device": "gpu" if settings.ocr_use_gpu else "cpu",
+                    "enable_mkldnn": False,
+                    "use_textline_orientation": True,
+                },
+                {
+                    "lang": settings.ocr_language,
+                    "enable_mkldnn": False,
+                    "use_angle_cls": True,
+                    "use_gpu": settings.ocr_use_gpu,
+                    "show_log": False,
+                },
+                {
+                    "lang": settings.ocr_language,
+                    "enable_mkldnn": False,
+                    "use_angle_cls": True,
+                    "use_gpu": settings.ocr_use_gpu,
+                },
+            ):
+                try:
+                    reader = PaddleOCR(**kwargs)
+                    break
+                except (TypeError, ValueError) as exc:
+                    init_errors.append(exc)
 
         if reader is None:
             last_error = init_errors[-1] if init_errors else RuntimeError("Unknown PaddleOCR initialization failure.")
@@ -210,6 +248,7 @@ def extract_ocr_result(file_path: Path) -> OCRResult:
         lines: list[OCRLine] = []
         engine_failed = False
         for path in input_paths:
+            results = None
             with _ocr_inference_lock:
                 try:
                     try:
@@ -219,7 +258,8 @@ def extract_ocr_result(file_path: Path) -> OCRResult:
                 except Exception:
                     engine_failed = True
                     break
-            lines.extend(_collect_paddle_lines(results))
+            if results is not None:
+                lines.extend(_collect_paddle_lines(results))
 
         text = "\n".join(line.text for line in lines)
         scores = [line.confidence for line in lines if line.confidence is not None]
@@ -237,7 +277,10 @@ def extract_ocr_result(file_path: Path) -> OCRResult:
     finally:
         for path in temp_images:
             if path.exists():
-                path.unlink()
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
 
 def extract_ocr_text(file_path: Path) -> str:

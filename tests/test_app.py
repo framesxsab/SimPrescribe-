@@ -100,9 +100,11 @@ def test_history_api_route():
 
 
 def test_history_page_exposes_review_triage():
+    from datetime import datetime, timezone
+
     record = {
         "id": "history-triage-record",
-        "created_at": "2026-07-31T00:00:00+00:00",
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "filename": "triage.pdf",
         "review_status": "needs_review",
         "medications": [],
@@ -653,6 +655,67 @@ def test_fallback_extract_handles_multiline_prescriptions():
     assert len(medications) >= 2
     assert medications[0]["name"]
     assert medications[0]["frequency"] == "once daily"
+
+
+def test_fallback_extract_skips_clinician_headers_and_unstructured_noise():
+    raw_text = """Dr. S Patel
+MBBS MD
+Fox
+Tab Omeprazole 500mg 1-0-0
+Tab Paracetamol 10mg 0-1-0
+Tab Pantoprazole 200mg 0-0-1"""
+
+    medications = fallback_extract(raw_text)["medications"]
+
+    assert [item["name"] for item in medications] == ["Omeprazole", "Paracetamol", "Pantoprazole"]
+
+
+def test_fallback_extract_preserves_legacy_prescription_forms_without_dataset_matches():
+    raw_text = """Tr Belledonna
+15 me
+Amphogel gsad
+120me
+M &FI Soluton
+Sig: 5ml tid a.c."""
+
+    medications = fallback_extract(raw_text)["medications"]
+    names = [item["name"] for item in medications]
+
+    assert any("Belledonna" in name for name in names)
+    assert any("Amphogel" in name for name in names)
+    assert any("M" in name for name in names)
+    assert medications[0]["dosage"] == "15 mg"
+    assert medications[1]["dosage"] == "120mg"
+    assert all(item["name"] != "Sig:" for item in medications)
+
+
+def test_fallback_extract_scans_past_long_prescription_headers():
+    raw_text = """DD
+FORM
+1289
+1 NOV 71
+DOD PRESCRIPTION
+John R. Doe, HM3, USN
+U.S.S. Neverforgotten
+MEDICAL FACILITY
+DATE
+23 JAN99
+R (Superscription)
+gm or ml
+(Inscription)
+Tr Belledonna
+15 me
+Amphogel gsad
+120me
+(Subscription)
+M &FI Soluton
+(Signa)
+Sig: 5ml tid a.c.
+MFGR: Wyeth"""
+
+    medications = fallback_extract(raw_text)["medications"]
+
+    assert [item["name"] for item in medications] == ["Belledonna", "Amphogel Gsad", "M &Fi"]
 
 
 def test_build_medication_record_normalizes_model_output_fields():

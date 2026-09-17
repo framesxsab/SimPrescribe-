@@ -1,10 +1,12 @@
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
 
 def _csv_set(value: str) -> set[str]:
@@ -19,6 +21,7 @@ class Settings:
     templates_dir: Path = BASE_DIR / "templates"
     static_dir: Path = BASE_DIR / "static"
     uploads_dir: Path = BASE_DIR / "uploads"
+    prescription_storage_dir: Path = Path(os.environ.get("PRESCRIPTION_STORAGE_DIR", str(BASE_DIR / "data" / "prescriptions")))
     data_dir: Path = BASE_DIR / "data"
     history_file: Path = BASE_DIR / "data" / "analysis_history.json"
     database_url: str = os.environ.get("DATABASE_URL", f"sqlite:///{(BASE_DIR / 'data' / 'simpliscribe.db').as_posix()}")
@@ -34,6 +37,7 @@ class Settings:
     oidc_reviewer_subjects: str = os.environ.get("OIDC_REVIEWER_SUBJECTS", "")
     auth_required: bool = os.environ.get("AUTH_REQUIRED", "").strip().lower() in {"1", "true", "yes", "on"}
     retention_days: int = int(os.environ.get("RETENTION_DAYS", "30"))
+    order_retention_days: int = int(os.environ.get("ORDER_RETENTION_DAYS", "365"))
     session_max_age_seconds: int = int(os.environ.get("SESSION_MAX_AGE_SECONDS", "28800"))
     session_https_only: bool = os.environ.get("SESSION_HTTPS_ONLY", "").strip().lower() in {"1", "true", "yes", "on"}
     india_medicine_dataset: Path = BASE_DIR / "A_Z_medicines_dataset_of_India.csv"
@@ -42,6 +46,9 @@ class Settings:
     max_pdf_pages: int = int(os.environ.get("MAX_PDF_PAGES", "10"))
     max_image_pixels: int = int(os.environ.get("MAX_IMAGE_PIXELS", "40000000"))
     min_ocr_confidence: float = float(os.environ.get("MIN_OCR_CONFIDENCE", "0.80"))
+    ocr_cache_dir: Path = Path(os.environ.get("OCR_CACHE_DIR", str(BASE_DIR / "tmp" / "ocr-cache")))
+    paddle_home: Path = Path(os.environ.get("PADDLE_HOME", str(ocr_cache_dir / "paddle")))
+    paddlex_cache_home: Path = Path(os.environ.get("PADDLE_PDX_CACHE_HOME", str(ocr_cache_dir / "paddlex")))
     hf_token: str = os.environ.get("HUGGINGFACEHUB_API_TOKEN", "")
     hf_model: str = os.environ.get("HF_CHAT_MODEL", "Qwen/Qwen2.5-7B-Instruct")
     inference_provider: str = os.environ.get("INFERENCE_PROVIDER", "huggingface")
@@ -107,6 +114,14 @@ class Settings:
 
     def validate_runtime(self) -> None:
         errors: list[str] = []
+        for variable, directory in (("OCR_CACHE_DIR", self.ocr_cache_dir), ("PADDLE_HOME", self.paddle_home), ("PADDLE_PDX_CACHE_HOME", self.paddlex_cache_home)):
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(dir=directory, prefix=".write-test-", delete=False) as handle:
+                    probe = Path(handle.name)
+                probe.unlink(missing_ok=True)
+            except OSError as exc:
+                errors.append(f"{variable} must be writable ({directory}): {exc}")
         if self.production:
             if self.session_secret == "development-only-change-me" or len(self.session_secret) < 32:
                 errors.append("SESSION_SECRET must be a unique value of at least 32 characters")
@@ -119,6 +134,8 @@ class Settings:
                 errors.append("DATABASE_URL must use PostgreSQL in production")
         if self.retention_days < 1:
             errors.append("RETENTION_DAYS must be at least 1")
+        if self.order_retention_days < 1:
+            errors.append("ORDER_RETENTION_DAYS must be at least 1")
         if self.session_max_age_seconds < 1:
             errors.append("SESSION_MAX_AGE_SECONDS must be at least 1")
         if self.admin_role not in {"admin", "reviewer", "auditor"}:

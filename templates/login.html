@@ -26,6 +26,11 @@
       <button class="w-full rounded-xl {% if oidc_enabled %}bg-slate-800 hover:bg-slate-900{% else %}bg-teal-700 hover:bg-teal-800{% endif %} px-4 py-3 font-bold text-white">Sign in</button>
     </form>
     {% endif %}
+    <div class="mt-6 grid grid-cols-2 gap-3 text-center text-sm">
+      <a class="rounded-xl border border-slate-300 px-3 py-2 font-semibold" href="/register/patient">Patient registration</a>
+      <a class="rounded-xl border border-slate-300 px-3 py-2 font-semibold" href="/register/pharmacy">Pharmacy registration</a>
+    </div>
+    <p class="mt-5 text-xs leading-5 text-slate-500">The platform helps patients understand and fulfil an existing prescription; it does not perform medical diagnosis.</p>
   </main>
 </body>
 </html>

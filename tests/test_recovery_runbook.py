@@ -17,6 +17,8 @@ def _verifier_commands(source: str, restore: str, backup: str) -> list[list[str]
             [
                 "powershell",
                 "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
                 "-File",
                 str(PS1),
                 "-SourceDatabaseUrl",

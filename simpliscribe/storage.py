@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, create_engine, delete, insert, select, text, update
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, MetaData, String, Table, Text, UniqueConstraint, create_engine, delete, insert, select, text, update
 
 from .config import settings
 
@@ -41,6 +41,93 @@ vector_cache_table = Table(
     Column("hit_count", Integer, nullable=False, default=0),
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
     Column("last_accessed_at", DateTime(timezone=True), nullable=False),
+)
+users = Table(
+    "users", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("email", String(255), nullable=False, unique=True, index=True),
+    Column("password_hash", Text, nullable=False),
+    Column("role", String(32), nullable=False, index=True),
+    Column("full_name", String(255), nullable=False),
+    Column("phone", String(32), nullable=False),
+    Column("pin_code", String(6), nullable=False, index=True),
+    Column("active", Boolean, nullable=False, default=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+pharmacies = Table(
+    "pharmacies", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("user_id", String(36), ForeignKey("users.id"), nullable=False, unique=True, index=True),
+    Column("business_name", String(255), nullable=False),
+    Column("license_number", String(128), nullable=False, unique=True),
+    Column("address", Text, nullable=False),
+    Column("pin_code", String(6), nullable=False, index=True),
+    Column("serviceable_pins_json", Text, nullable=False, default="[]"),
+    Column("supports_pickup", Boolean, nullable=False, default=True),
+    Column("supports_delivery", Boolean, nullable=False, default=False),
+    Column("approval_status", String(32), nullable=False, default="pending", index=True),
+    Column("approved_at", DateTime(timezone=True), nullable=True),
+)
+inventory = Table(
+    "inventory", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("pharmacy_id", String(36), ForeignKey("pharmacies.id"), nullable=False, index=True),
+    Column("medicine_name", String(255), nullable=False),
+    Column("normalized_name", String(255), nullable=False),
+    Column("unit_label", String(128), nullable=False),
+    Column("price_paise", Integer, nullable=False),
+    Column("stock_quantity", Integer, nullable=False),
+    Column("active", Boolean, nullable=False, default=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("pharmacy_id", "normalized_name", name="uq_inventory_pharmacy_medicine"),
+)
+prescription_files = Table(
+    "prescription_files", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("analysis_id", String(36), ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False, unique=True, index=True),
+    Column("owner_id", String(255), nullable=False, index=True),
+    Column("storage_name", String(255), nullable=False, unique=True),
+    Column("original_name", String(255), nullable=False),
+    Column("content_type", String(128), nullable=False),
+    Column("sha256", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False, index=True),
+)
+orders = Table(
+    "orders", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("analysis_id", String(36), nullable=False, index=True),
+    Column("patient_id", String(255), nullable=False, index=True),
+    Column("pharmacy_id", String(36), ForeignKey("pharmacies.id"), nullable=False, index=True),
+    Column("status", String(32), nullable=False, index=True),
+    Column("fulfillment_mode", String(32), nullable=False),
+    Column("delivery_address", Text, nullable=False, default=""),
+    Column("total_paise", Integer, nullable=False, default=0),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False, index=True),
+)
+order_items = Table(
+    "order_items", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("order_id", String(36), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("inventory_id", String(36), ForeignKey("inventory.id"), nullable=True),
+    Column("medicine_name", String(255), nullable=False),
+    Column("prescription_json", Text, nullable=False),
+    Column("generic_inquiry", Boolean, nullable=False, default=False),
+    Column("availability", String(32), nullable=False, default="pending"),
+    Column("verified_quantity", Integer, nullable=True),
+    Column("unit_price_paise", Integer, nullable=True),
+    Column("pharmacist_note", Text, nullable=False, default=""),
+)
+order_events = Table(
+    "order_events", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("order_id", String(36), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("actor_id", String(255), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("note", Text, nullable=False, default=""),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -251,4 +338,199 @@ def get_vector_cache_stats() -> dict[str, Any]:
         count = connection.execute(select(text("count(*)")).select_from(vector_cache_table)).scalar() or 0
         total_hits = connection.execute(select(text("coalesce(sum(hit_count), 0)")).select_from(vector_cache_table)).scalar() or 0
         return {"total_db_entries": int(count), "total_db_hits": int(total_hits)}
+
+
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    query = select(users).where(users.c.email == email.strip().lower())
+    with engine.connect() as connection:
+        row = connection.execute(query).mappings().one_or_none()
+    if not row:
+        return None
+    result = dict(row)
+    if result["role"] == "pharmacy":
+        pharmacy = get_pharmacy_by_user(result["id"])
+        result["approval_status"] = pharmacy["approval_status"] if pharmacy else "pending"
+    return result
+
+
+def get_user(user_id: str) -> dict[str, Any] | None:
+    with engine.connect() as connection:
+        row = connection.execute(select(users).where(users.c.id == user_id)).mappings().one_or_none()
+    return dict(row) if row else None
+
+
+def create_user(user: dict[str, Any], pharmacy: dict[str, Any] | None = None) -> None:
+    with engine.begin() as connection:
+        connection.execute(insert(users).values(**user))
+        if pharmacy:
+            connection.execute(insert(pharmacies).values(**pharmacy))
+
+
+def get_pharmacy_by_user(user_id: str) -> dict[str, Any] | None:
+    with engine.connect() as connection:
+        row = connection.execute(select(pharmacies).where(pharmacies.c.user_id == user_id)).mappings().one_or_none()
+    if not row:
+        return None
+    result = dict(row)
+    result["serviceable_pins"] = json.loads(result.pop("serviceable_pins_json"))
+    return result
+
+
+def list_pharmacies(status: str | None = None) -> list[dict[str, Any]]:
+    query = select(pharmacies, users.c.email, users.c.phone).join(users, users.c.id == pharmacies.c.user_id)
+    if status:
+        query = query.where(pharmacies.c.approval_status == status)
+    query = query.order_by(pharmacies.c.business_name)
+    with engine.connect() as connection:
+        rows = connection.execute(query).mappings().all()
+    results = []
+    for row in rows:
+        item = dict(row)
+        item["serviceable_pins"] = json.loads(item.pop("serviceable_pins_json"))
+        results.append(item)
+    return results
+
+
+def set_pharmacy_approval(pharmacy_id: str, status: str) -> bool:
+    values: dict[str, Any] = {"approval_status": status, "approved_at": _now() if status == "approved" else None}
+    with engine.begin() as connection:
+        result = connection.execute(update(pharmacies).where(pharmacies.c.id == pharmacy_id).values(**values))
+    return bool(result.rowcount)
+
+
+def save_prescription_file(record: dict[str, Any]) -> None:
+    with engine.begin() as connection:
+        connection.execute(insert(prescription_files).values(**record))
+
+
+def get_prescription_file(analysis_id: str) -> dict[str, Any] | None:
+    with engine.connect() as connection:
+        row = connection.execute(select(prescription_files).where(prescription_files.c.analysis_id == analysis_id)).mappings().one_or_none()
+    return dict(row) if row else None
+
+
+def purge_expired_marketplace() -> tuple[list[str], int]:
+    now = _now()
+    with engine.begin() as connection:
+        expired_files = connection.execute(
+            select(prescription_files.c.storage_name).where(prescription_files.c.expires_at < now)
+        ).scalars().all()
+        if expired_files:
+            connection.execute(delete(prescription_files).where(prescription_files.c.expires_at < now))
+        expired_order_ids = connection.execute(select(orders.c.id).where(orders.c.expires_at < now)).scalars().all()
+        if expired_order_ids:
+            connection.execute(delete(order_events).where(order_events.c.order_id.in_(expired_order_ids)))
+            connection.execute(delete(order_items).where(order_items.c.order_id.in_(expired_order_ids)))
+        expired_orders = connection.execute(delete(orders).where(orders.c.expires_at < now))
+    return list(expired_files), int(expired_orders.rowcount or 0)
+
+
+def seed_test_pharmacies() -> None:
+    """Seed approved test pharmacies in development mode when none exist.
+
+    Creates three pharmacies with realistic inventory covering common PIN codes
+    (560001 Bangalore, 110001 Delhi, 400001 Mumbai) so the upload-to-order flow
+    can be tested without manual registration or admin approval.
+    """
+    import uuid as _uuid
+    from .security import hash_password
+
+    with engine.connect() as connection:
+        count = connection.execute(select(text("count(*)")).select_from(pharmacies)).scalar() or 0
+    if count > 0:
+        return
+
+    logger.info("Seeding test pharmacies for development mode...")
+    pharmacy_configs = [
+        {
+            "email": "medplus-test@localhost",
+            "full_name": "MedPlus Test Pharmacy",
+            "phone": "9876543210",
+            "pin_code": "560001",
+            "business_name": "MedPlus Pharmacy (Test)",
+            "license_number": "TEST-KA-PH-001",
+            "address": "123 MG Road, Bengaluru, Karnataka 560001",
+            "serviceable_pins": ["560001", "560002", "560003"],
+            "supports_pickup": True,
+            "supports_delivery": True,
+            "inventory": [
+                ("Paracetamol 500mg", "tablet", 120, 50),
+                ("Amoxicillin 250mg", "capsule", 350, 30),
+                ("Cetirizine 10mg", "tablet", 85, 100),
+                ("Azithromycin 500mg", "tablet", 450, 20),
+                ("Pantoprazole 40mg", "tablet", 180, 40),
+            ],
+        },
+        {
+            "email": "apollo-test@localhost",
+            "full_name": "Apollo Pharmacy Test",
+            "phone": "9876543211",
+            "pin_code": "110001",
+            "business_name": "Apollo Pharmacy (Test)",
+            "license_number": "TEST-DL-PH-002",
+            "address": "45 Connaught Place, New Delhi 110001",
+            "serviceable_pins": ["110001", "110002"],
+            "supports_pickup": True,
+            "supports_delivery": False,
+            "inventory": [
+                ("Paracetamol 500mg", "tablet", 100, 80),
+                ("Ibuprofen 400mg", "tablet", 150, 60),
+                ("Metformin 500mg", "tablet", 200, 45),
+                ("Cetirizine 10mg", "tablet", 75, 120),
+                ("Omeprazole 20mg", "capsule", 220, 35),
+            ],
+        },
+        {
+            "email": "netmeds-test@localhost",
+            "full_name": "Netmeds Test Pharmacy",
+            "phone": "9876543212",
+            "pin_code": "400001",
+            "business_name": "Netmeds Pharmacy (Test)",
+            "license_number": "TEST-MH-PH-003",
+            "address": "78 Marine Drive, Mumbai, Maharashtra 400001",
+            "serviceable_pins": ["400001", "400002", "400003"],
+            "supports_pickup": True,
+            "supports_delivery": True,
+            "inventory": [
+                ("Paracetamol 500mg", "tablet", 110, 70),
+                ("Amoxicillin 250mg", "capsule", 320, 25),
+                ("Pantoprazole 40mg", "tablet", 165, 50),
+                ("Atorvastatin 10mg", "tablet", 280, 30),
+                ("Azithromycin 500mg", "tablet", 420, 15),
+            ],
+        },
+    ]
+
+    now = _now()
+    password_hash = hash_password("test-password-dev-only")
+    for config in pharmacy_configs:
+        user_id = str(_uuid.uuid4())
+        pharmacy_id = str(_uuid.uuid4())
+        try:
+            with engine.begin() as connection:
+                connection.execute(insert(users).values(
+                    id=user_id, email=config["email"], password_hash=password_hash,
+                    role="pharmacy", full_name=config["full_name"], phone=config["phone"],
+                    pin_code=config["pin_code"], active=True, created_at=now,
+                ))
+                connection.execute(insert(pharmacies).values(
+                    id=pharmacy_id, user_id=user_id, business_name=config["business_name"],
+                    license_number=config["license_number"], address=config["address"],
+                    pin_code=config["pin_code"],
+                    serviceable_pins_json=json.dumps(sorted(set(config["serviceable_pins"]))),
+                    supports_pickup=config["supports_pickup"],
+                    supports_delivery=config["supports_delivery"],
+                    approval_status="approved", approved_at=now,
+                ))
+                for med_name, unit, price, stock in config["inventory"]:
+                    normalized = med_name.strip().upper()
+                    connection.execute(insert(inventory).values(
+                        id=str(_uuid.uuid4()), pharmacy_id=pharmacy_id,
+                        medicine_name=med_name, normalized_name=normalized,
+                        unit_label=unit, price_paise=price, stock_quantity=stock,
+                        active=True, updated_at=now,
+                    ))
+            logger.info("  Seeded: %s (%s)", config["business_name"], config["pin_code"])
+        except Exception:
+            logger.warning("  Skipping %s (already exists or error)", config["business_name"])
 

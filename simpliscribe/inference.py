@@ -32,12 +32,22 @@ FORM_MAP = {
     "suspension": "suspension",
     "inj": "injection",
     "injection": "injection",
+    "tr": "tincture",
+    "tinct": "tincture",
+    "tincture": "tincture",
+    "sol": "solution",
+    "solution": "solution",
+    "soluton": "solution",
+    "elix": "elixir",
+    "elixir": "elixir",
+    "lot": "lotion",
+    "lotion": "lotion",
     "cream": "cream",
     "ointment": "ointment",
     "drops": "drops",
 }
 
-FORM_PATTERN = r"tab(?:s)?|tablet|cap(?:s)?|capsule|syp|syr|syrup|susp|suspension|inj|injection|cream|ointment|drops"
+FORM_PATTERN = r"tab(?:s)?|tablet|cap(?:s)?|capsule|syp|syr|syrup|susp|suspension|inj|injection|tr|tinct(?:ure)?|sol(?:uton|ution)?|elix(?:ir)?|lot(?:ion)?|cream|ointment|drops"
 
 FREQUENCY_MAP = {
     "od": "once daily",
@@ -118,7 +128,7 @@ def canonicalize_medicine_name(value: str) -> str:
         if not normalized:
             tokens.pop()
             continue
-        if normalized in GENERIC_NAME_TOKENS or re.fullmatch(r"\d+(?:\.\d+)?(?:mg|ml|mcg|g)?", normalized):
+        if normalized in GENERIC_NAME_TOKENS or re.fullmatch(r"\d+(?:\.\d+)?(?:mg|ml|mcg|g|me)?", normalized):
             tokens.pop()
             continue
         break
@@ -134,7 +144,7 @@ def extract_candidate_name(segment: str) -> str:
             continue
         if normalized in FORM_MAP or normalized in STOP_TOKENS:
             continue
-        if re.fullmatch(r"\d+(?:mg|ml|mcg|g)?", normalized):
+        if re.fullmatch(r"\d+(?:mg|ml|mcg|g|me)?", normalized):
             break
         if re.fullmatch(r"[01]-[01]-[01]", normalized):
             break
@@ -154,7 +164,7 @@ def build_match_candidates(value: str) -> list[str]:
         for token in normalized.split()
         if token not in FORM_MAP
         and token not in STOP_TOKENS
-        and not re.fullmatch(r"\d+(?:mg|ml|mcg|g)?", token)
+        and not re.fullmatch(r"\d+(?:mg|ml|mcg|g|me)?", token)
         and not re.fullmatch(r"[01]-[01]-[01]", token)
     ]
     if not tokens:
@@ -386,9 +396,10 @@ def extract_form(segment: str) -> str:
 
 
 def extract_dosage(segment: str, form: str) -> str:
-    match = re.search(r"\b\d+(?:\.\d+)?\s?(?:mg|ml|mcg|g)\b", segment, flags=re.IGNORECASE)
+    match = re.search(r"\b\d+(?:\.\d+)?\s?(?:mg|ml|mcg|g|me)\b", segment, flags=re.IGNORECASE)
     if match:
-        return match.group(0).replace("  ", " ")
+        value = match.group(0).replace("  ", " ")
+        return re.sub(r"(?i)me$", "mg", value)
 
     bare_strength = re.search(r"\b(\d{2,4})\b", segment)
     if bare_strength and form.lower() in {"tablet", "capsule"}:
@@ -793,11 +804,12 @@ JUNK_NAME_PATTERNS = [
     # Clinic / hospital / institution names
     r"(?i)\b(clinic|hospital|health\s*care|health\s*choice|medical\s*center|nursing|laboratory|labs?|pharmacy|dispensary|polyclinic)\b",
     # Doctor / patient form fields
-    r"(?i)\b(mr\.|mrs\.|ms\.|miss\.|dr\.|prof\.|patient|doctor|prescri|signature|address|phone|tel|fax|email|reg\s*no|registration|mbbs|md|licence|license)\b",
+    r"(?i)\b(?:mr|mrs|ms|miss|dr|prof)\.?(?=\s|$)|\b(?:patient|doctor|prescri|signature|address|phone|tel|fax|email|reg\s*no|registration|mbbs|md|licence|license)\b",
     # Frequency/timing phrases misidentified as names
     r"(?i)^(once\s+a|twice\s+a|thrice\s+a|after\s+(food|meal)|before\s+(food|meal)|morning|evening|night|daily|bedtime)",
     # Generic form text
-    r"(?i)^(rx|date|age|sex|gender|weight|diagnosis|complaint|history|follow\s*up|next\s*visit|advice)",
+    r"(?i)^(rx|sig|seg|sign|directions?|instructions?|date|age|sex|gender|weight|diagnosis|complaint|history|follow\s*up|next\s*visit|advice)\b",
+    r"(?i)^(?:gm\s+or\s+ml|lot\s+no|no)\s*[:.]?",
     # Pure numbers, single characters, or very short junk
     r"^[\d\s.,:;/\-\(\)\[\]]+$",
     # Unknown medication placeholder
@@ -806,7 +818,7 @@ JUNK_NAME_PATTERNS = [
 
 JUNK_NAME_EXACT = {
     "unknown", "unknown medication", "medication", "n/a", "na", "none",
-    "rx", "date", "age", "sex", "name", "patient", "doctor",
+    "rx", "sig", "sign", "directions", "instruction", "instructions", "date", "age", "sex", "name", "patient", "doctor",
     "health", "clinic", "hospital", "pharmacy", "lab", "labs",
     "address", "phone", "signature", "diagnosis",
 }
@@ -997,13 +1009,33 @@ def call_http_endpoint(raw_text: str) -> dict[str, Any]:
 
 
 def fallback_extract(raw_text: str) -> dict[str, Any]:
-    candidates = split_segments(raw_text)
+    raw_candidates = split_segments(raw_text)
+    candidates: list[str] = []
+    index = 0
+    while index < len(raw_candidates):
+        segment = raw_candidates[index]
+        if re.fullmatch(r"\d{1,4}", segment) and index + 1 < len(raw_candidates) and re.fullmatch(r"(?i)(?:mg|ml|mcg|g|me)", raw_candidates[index + 1]):
+            segment = f"{segment} {raw_candidates[index + 1]}"
+            index += 1
+        if candidates and re.fullmatch(r"(?i)\d+(?:\.\d+)?\s?(?:mg|ml|mcg|g|me)", segment):
+            candidates[-1] = f"{candidates[-1]} {segment}"
+        else:
+            candidates.append(segment)
+        index += 1
     medications: list[dict[str, Any]] = []
-    for segment in candidates[:6]:
+    for segment in candidates:
         derived_name = extract_candidate_name(segment)
         match = find_medicine_match(derived_name if derived_name != "Unknown medication" else segment)
         entry = match.entry if match else None
         dosage_form = extract_form(segment)
+        has_strength_or_timing = bool(
+            re.search(r"\b\d+(?:\.\d+)?\s?(?:mg|ml|mcg|g|me)\b|\b[01]-[01]-[01]\b", segment, flags=re.IGNORECASE)
+        )
+        # Do not turn a clinician/header/noise line into a medicine requirement.
+        # Unknown medicine text must carry at least one prescription signal.
+        has_prescription_marker = bool(re.search(rf"(?i)\b(?:{FORM_PATTERN})\b", segment))
+        if entry is None and dosage_form == "Medication" and not has_strength_or_timing and not has_prescription_marker:
+            continue
         duration = extract_duration(segment)
         frequency = extract_frequency(segment)
         name = derive_name(segment, entry)
@@ -1026,6 +1058,8 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
                 )
             )
         )
+        if len(medications) >= 6:
+            break
 
     medications = filter_junk_medications(medications)
     return {

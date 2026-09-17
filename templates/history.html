@@ -52,6 +52,7 @@
         <div class="grid gap-5" id="history-list">
             {% for analysis in analyses %}
             {% set review_status = analysis.review_status or 'needs_review' %}
+            {% if user and user.role == 'patient' and analysis.patient_review_status %}{% set review_status = analysis.patient_review_status %}{% endif %}
             <article class="history-item rounded-2xl border border-slate-200 bg-white p-6 shadow-sm hover:border-slate-300 transition-colors" data-review-status="{{ review_status }}">
                 <div class="flex flex-col gap-5">
                     <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">

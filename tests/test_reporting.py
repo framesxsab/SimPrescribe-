@@ -145,3 +145,44 @@ def test_safe_text_falls_back():
     assert safe_text("") == "Not available"
     assert safe_text("x") == "x"
     assert safe_text(None) == "Not available"
+
+
+def test_display_timestamp_compacts_iso_values():
+    from simpliscribe.reporting import display_timestamp
+
+    assert display_timestamp("2026-09-16T04:43:31.456537+00:00") == "16 Sep 2026, 04:43 UTC"
+
+
+def test_empty_report_explains_missing_structured_medicines():
+    import fitz
+
+    pdf_bytes = build_pdf_report({"id": "empty-report", "created_at": "2026-09-16T04:43:31+00:00", "raw_text": "OCR captured text", "medications": []}, "SimpliScribe")
+    document = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        text = " ".join(page.get_text() for page in document)
+        assert "NO MEDICATIONS" in text and "STRUCTURED" in text
+        assert "Review the original prescription" in text
+        assert document.page_count >= 2
+    finally:
+        document.close()
+
+
+def test_multi_medication_cards_do_not_split_detail_rows():
+    import fitz
+
+    medications = []
+    for name in ("Paracetamol", "Amoxycillin", "Cetirizine"):
+        medications.append({
+            "name": name, "type": "Tablet", "category": "General", "dosage": "500 mg",
+            "frequency": "once daily", "duration": "3 days", "insight": "Use as prescribed.",
+            "requires_review": True, "review_reasons": ["Confirm against original."],
+            "composition": f"{name} composition", "source": "OCR only", "uses": ["General"],
+        })
+    pdf_bytes = build_pdf_report({"id": "multi-layout", "created_at": "2026-09-16T04:43:31+00:00", "raw_text": "line 1\nline 2", "medications": medications}, "SimpliScribe")
+    document = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        assert document.page_count == 3
+        assert all("Medication summary" not in page.get_text() for page in document[1:])
+        assert "Report trace" in document[-1].get_text()
+    finally:
+        document.close()

@@ -77,3 +77,6 @@ source = ["simpliscribe"]
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

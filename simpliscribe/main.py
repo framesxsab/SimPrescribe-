@@ -1,7 +1,9 @@
 import asyncio
+import json
 import time
 import uuid
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -12,14 +14,23 @@ from starlette.middleware.sessions import SessionMiddleware
 from .config import settings
 from .metrics import generate_prometheus_metrics, get_metrics_snapshot, record_http_request
 from .retrieval import get_retriever, get_vector_cache
-from .schemas import CacheStatsResponse, HealthResponse, LiveResponse, SimilarPrescriptionsResponse
-from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, oidc_authorization_url, owner_id, require_edit_role, verify_csrf
-from .storage import append_audit_event, ensure_schema, load_audit_events, load_history, ping_database
-from .web import analyze, download_report, export_audit_csv, history_payload, render_dashboard, render_details, render_history, review_analysis
+from .marketplace import MarketplaceConflict, accept_order, cancel_order, create_order, deactivate_inventory_item, decline_order, list_orders_for, matching_pharmacies, order_detail, pharmacy_inventory, pharmacy_transition, quote_order, save_inventory_item, valid_pin
+from .schemas import CacheStatsResponse, HealthResponse, InventoryRequest, LiveResponse, OrderRequest, PatientReviewRequest, QuoteRequest, SimilarPrescriptionsResponse, TransitionRequest
+from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, hash_password, oidc_authorization_url, owner_id, require_edit_role, require_role, verify_csrf
+from .storage import append_audit_event, create_user, ensure_schema, get_analysis_record, get_pharmacy_by_user, get_user, get_user_by_email, load_audit_events, load_history, list_pharmacies, ping_database, purge_expired_marketplace, seed_test_pharmacies, set_pharmacy_approval
+from .web import analyze, download_report, export_audit_csv, history_payload, patient_review_analysis, prescription_source, render_dashboard, render_details, render_history, review_analysis
 
 settings.validate_runtime()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+settings.prescription_storage_dir.mkdir(parents=True, exist_ok=True)
 ensure_schema()
+if not settings.production:
+    seed_test_pharmacies()
+for expired_name in purge_expired_marketplace()[0]:
+    try:
+        (settings.prescription_storage_dir / expired_name).unlink(missing_ok=True)
+    except OSError:
+        pass
 load_history()
 
 app = FastAPI(title=f"{settings.app_name} API")
@@ -29,6 +40,11 @@ _request_times: dict[str, deque[float]] = defaultdict(deque)
 _login_times: dict[str, deque[float]] = defaultdict(deque)
 _MAX_BUCKETS = 4096
 _analysis_slots = asyncio.Semaphore(2)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> RedirectResponse:
+    return RedirectResponse("/static/favicon.svg", status_code=307)
 
 
 def _rate_limit_key(request: Request) -> str:
@@ -67,7 +83,8 @@ async def protect_health_data_responses(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     request.state.request_id = request_id
     response = None
-    if settings.authentication_enabled and request.url.path not in {"/login", "/login/oidc", "/auth/callback", "/api/health", "/api/live", "/api/metrics"} and not request.url.path.startswith("/static/"):
+    public_paths = {"/login", "/login/oidc", "/auth/callback", "/register", "/register/patient", "/register/pharmacy", "/api/health", "/api/live", "/api/metrics"}
+    if settings.authentication_enabled and request.url.path not in public_paths and not request.url.path.startswith("/static/"):
         if current_user(request) is None:
             if request.url.path.startswith("/api/"):
                 response = JSONResponse(status_code=401, content={"detail": "Authentication required."})
@@ -128,9 +145,62 @@ async def login_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "login.html", _login_page_context(request))
 
 
+def _registration_context(request: Request, role: str, error: str = "", success: str = "") -> dict[str, object]:
+    return {"app_name": settings.app_name, "role": role, "csrf_token": csrf_token(request), "error": error, "success": success}
+
+
+@app.get("/register/{role}", response_class=HTMLResponse)
+async def register_page(request: Request, role: str) -> HTMLResponse:
+    if role not in {"patient", "pharmacy"}:
+        raise HTTPException(status_code=404, detail="Registration type not found.")
+    return templates.TemplateResponse(request, "register.html", _registration_context(request, role))
+
+
+@app.post("/register/{role}", response_class=HTMLResponse)
+async def register_account(request: Request, role: str) -> HTMLResponse:
+    if role not in {"patient", "pharmacy"}:
+        raise HTTPException(status_code=404, detail="Registration type not found.")
+    form = await request.form()
+    verify_csrf(request, str(form.get("csrf") or ""))
+    email = str(form.get("email") or "").strip().lower()[:255]
+    full_name = str(form.get("full_name") or "").strip()[:255]
+    phone = str(form.get("phone") or "").strip()[:32]
+    pin_code = str(form.get("pin_code") or "").strip()
+    if "@" not in email or not full_name or not phone or not valid_pin(pin_code):
+        return templates.TemplateResponse(request, "register.html", _registration_context(request, role, "Enter a valid name, email, phone number, and six-digit Indian PIN code."), status_code=400)
+    try:
+        password_hash = hash_password(str(form.get("password") or ""))
+        user_id = str(uuid.uuid4())
+        user = {"id": user_id, "email": email, "password_hash": password_hash, "role": role,
+                "full_name": full_name, "phone": phone, "pin_code": pin_code, "active": True,
+                "created_at": datetime.now(timezone.utc)}
+        pharmacy = None
+        if role == "pharmacy":
+            business_name = str(form.get("business_name") or "").strip()[:255]
+            license_number = str(form.get("license_number") or "").strip()[:128]
+            address = str(form.get("address") or "").strip()[:1000]
+            serviceable = [item.strip() for item in str(form.get("serviceable_pins") or "").split(",") if item.strip()]
+            if not business_name or not license_number or not address or any(not valid_pin(item) for item in serviceable):
+                raise ValueError("Enter complete pharmacy details and valid comma-separated serviceable PIN codes.")
+            pharmacy = {"id": str(uuid.uuid4()), "user_id": user_id, "business_name": business_name,
+                        "license_number": license_number, "address": address, "pin_code": pin_code,
+                        "serviceable_pins_json": json.dumps(sorted(set(serviceable))),
+                        "supports_pickup": bool(form.get("supports_pickup")), "supports_delivery": bool(form.get("supports_delivery")),
+                        "approval_status": "pending", "approved_at": None}
+            if not pharmacy["supports_pickup"] and not pharmacy["supports_delivery"]:
+                raise ValueError("Select pickup, local delivery, or both.")
+        create_user(user, pharmacy)
+    except ValueError as exc:
+        return templates.TemplateResponse(request, "register.html", _registration_context(request, role, str(exc)), status_code=400)
+    except Exception:
+        return templates.TemplateResponse(request, "register.html", _registration_context(request, role, "That email or pharmacy licence is already registered."), status_code=409)
+    message = "Account created. You can sign in now." if role == "patient" else "Registration submitted. An administrator must approve the pharmacy before sign-in."
+    return templates.TemplateResponse(request, "register.html", _registration_context(request, role, success=message), status_code=201)
+
+
 @app.post("/login", response_class=HTMLResponse)
 async def login(request: Request, email: str = Form(...), password: str = Form(...), csrf: str = Form(...)):
-    if settings.oidc_enabled and not settings.bootstrap_admin_enabled:
+    if settings.oidc_enabled and not settings.bootstrap_admin_enabled and get_user_by_email(email.strip().lower()) is None:
         raise HTTPException(status_code=404, detail="Use organization sign-in.")
     verify_csrf(request, csrf)
     if not _consume_bucket(_login_times, _rate_limit_key(request), time.monotonic(), 60, 20):
@@ -178,12 +248,37 @@ async def logout(request: Request, csrf: str = Form(...)):
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard(request: Request) -> HTMLResponse:
+    user = current_user(request)
+    if user and user.get("role") == "pharmacy":
+        return RedirectResponse("/pharmacy", status_code=303)
+    if user and user.get("role") == "admin":
+        return RedirectResponse("/admin/pharmacies", status_code=303)
     return await render_dashboard(request, templates)
 
 
 @app.get("/history", response_class=HTMLResponse)
 async def serve_history(request: Request) -> HTMLResponse:
     return await render_history(request, templates)
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_chooser(request: Request) -> RedirectResponse:
+    return RedirectResponse("/register/patient", status_code=303)
+
+
+@app.get("/marketplace", response_class=HTMLResponse)
+async def marketplace_page(request: Request) -> HTMLResponse:
+    user = current_user(request)
+    if user and user.get("role") != "patient":
+        raise HTTPException(status_code=403, detail="Patient account required.")
+    analyses = load_history(user["id"]) if user else []
+    return templates.TemplateResponse(request, "marketplace.html", {
+        "analyses": analyses,
+        "app_name": settings.app_name,
+        "user": user,
+        "csrf_token": csrf_token(request),
+        "current": "marketplace",
+    })
 
 
 @app.get("/details/{analysis_id}", response_class=HTMLResponse)
@@ -219,6 +314,214 @@ async def get_report(request: Request, analysis_id: str):
 @app.patch("/api/analyses/{analysis_id}/review")
 async def review(request: Request, analysis_id: str):
     return await review_analysis(request, analysis_id, await request.json())
+
+
+@app.patch("/api/analyses/{analysis_id}/patient-review")
+async def patient_review(request: Request, analysis_id: str, payload: PatientReviewRequest):
+    return await patient_review_analysis(request, analysis_id, payload.model_dump())
+
+
+@app.get("/api/analyses/{analysis_id}/source")
+async def get_prescription_source(request: Request, analysis_id: str):
+    return await prescription_source(request, analysis_id)
+
+
+def _marketplace_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, MarketplaceConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, PermissionError):
+        return HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, LookupError):
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/analyses/{analysis_id}/pharmacies")
+async def find_pharmacies(request: Request, analysis_id: str, pin: str | None = None) -> dict:
+    user = current_user(request)
+    if settings.authentication_enabled or user is not None:
+        user = require_role(request, "patient")
+        profile = get_user(user["id"])
+        analysis = get_analysis_record(analysis_id, user["id"])
+        if not analysis or not profile:
+            raise HTTPException(status_code=404, detail="Prescription analysis not found.")
+        if analysis.get("patient_review_status") not in {"confirmed", "corrected"}:
+            raise HTTPException(status_code=409, detail="Confirm the prescription before finding pharmacies.")
+        search_pin = (pin or profile.get("pin_code") or "").strip()
+        return {"pharmacies": matching_pharmacies(search_pin, [item.get("name", "") for item in analysis.get("medications", [])])}
+
+    # Unauthenticated / local development mode
+    analysis = get_analysis_record(analysis_id, "local") or get_analysis_record(analysis_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Prescription analysis not found.")
+    search_pin = (pin or "560001").strip()
+    return {"pharmacies": matching_pharmacies(search_pin, [item.get("name", "") for item in analysis.get("medications", [])])}
+
+
+@app.get("/api/inventory")
+async def get_inventory(request: Request) -> dict:
+    user = require_role(request, "pharmacy")
+    return {"items": pharmacy_inventory(user["id"])}
+
+
+@app.post("/api/inventory", status_code=201)
+async def create_inventory(request: Request, payload: InventoryRequest) -> dict:
+    user = require_role(request, "pharmacy")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        return save_inventory_item(user["id"], payload.model_dump())
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.put("/api/inventory/{item_id}")
+async def update_inventory(request: Request, item_id: str, payload: InventoryRequest) -> dict:
+    user = require_role(request, "pharmacy")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        return save_inventory_item(user["id"], payload.model_dump(), item_id)
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.delete("/api/inventory/{item_id}")
+async def delete_inventory(request: Request, item_id: str) -> dict:
+    user = require_role(request, "pharmacy")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        deactivate_inventory_item(user["id"], item_id)
+        return {"id": item_id, "active": False}
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.post("/api/orders", status_code=201)
+async def request_order(request: Request, payload: OrderRequest) -> dict:
+    user = require_role(request, "patient")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        order_id = create_order(user["id"], **payload.model_dump())
+        append_audit_event(str(uuid.uuid4()), user["id"], "order_requested", payload.analysis_id, order_id=order_id)
+        return {"id": order_id, "status": "requested"}
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.get("/api/orders/{order_id}")
+async def get_order(request: Request, order_id: str) -> dict:
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        return order_detail(order_id, user)
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.post("/api/orders/{order_id}/quote")
+async def submit_quote(request: Request, order_id: str, payload: QuoteRequest) -> dict:
+    user = require_role(request, "pharmacy")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        quote_order(user["id"], order_id, payload.items)
+        return {"id": order_id, "status": "quoted"}
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.post("/api/orders/{order_id}/decline")
+async def reject_order(request: Request, order_id: str, payload: TransitionRequest) -> dict:
+    user = require_role(request, "pharmacy")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        decline_order(user["id"], order_id, payload.note)
+        return {"id": order_id, "status": "declined"}
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.post("/api/orders/{order_id}/accept")
+async def accept_quote(request: Request, order_id: str) -> dict:
+    user = require_role(request, "patient")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        accept_order(user["id"], order_id)
+        return {"id": order_id, "status": "accepted"}
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.post("/api/orders/{order_id}/cancel")
+async def cancel_patient_order(request: Request, order_id: str, payload: TransitionRequest) -> dict:
+    user = require_role(request, "patient")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        cancel_order(user["id"], order_id, payload.note)
+        return {"id": order_id, "status": "cancelled"}
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.post("/api/orders/{order_id}/status")
+async def update_order_status(request: Request, order_id: str, payload: TransitionRequest) -> dict:
+    user = require_role(request, "pharmacy")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    try:
+        pharmacy_transition(user["id"], order_id, payload.status, payload.note)
+        return {"id": order_id, "status": payload.status}
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+
+
+@app.post("/api/admin/pharmacies/{pharmacy_id}/approval")
+async def approve_pharmacy(request: Request, pharmacy_id: str, payload: TransitionRequest) -> dict:
+    user = require_role(request, "admin")
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    if payload.status not in {"approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Approval status must be approved or rejected.")
+    if not set_pharmacy_approval(pharmacy_id, payload.status):
+        raise HTTPException(status_code=404, detail="Pharmacy not found.")
+    append_audit_event(str(uuid.uuid4()), user["id"], "pharmacy_approval_changed", pharmacy_id=pharmacy_id, status=payload.status)
+    return {"id": pharmacy_id, "status": payload.status}
+
+
+@app.get("/orders", response_class=HTMLResponse)
+async def orders_page(request: Request) -> HTMLResponse:
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return templates.TemplateResponse(request, "orders.html", {"orders": list_orders_for(user), "app_name": settings.app_name,
+                                                                   "user": user, "csrf_token": csrf_token(request), "current": "orders"})
+
+
+@app.get("/orders/{order_id}", response_class=HTMLResponse)
+async def order_page(request: Request, order_id: str) -> HTMLResponse:
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        order = order_detail(order_id, user)
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+    return templates.TemplateResponse(request, "order.html", {"order": order, "app_name": settings.app_name,
+                                                                  "inventory": pharmacy_inventory(user["id"]) if user["role"] == "pharmacy" else [],
+                                                                  "user": user, "csrf_token": csrf_token(request), "current": "orders"})
+
+
+@app.get("/pharmacy", response_class=HTMLResponse)
+async def pharmacy_page(request: Request) -> HTMLResponse:
+    user = require_role(request, "pharmacy")
+    return templates.TemplateResponse(request, "pharmacy.html", {"profile": get_pharmacy_by_user(user["id"]),
+                                                                     "inventory": pharmacy_inventory(user["id"]), "orders": list_orders_for(user),
+                                                                     "app_name": settings.app_name, "user": user, "csrf_token": csrf_token(request), "current": "pharmacy"})
+
+
+@app.get("/admin/pharmacies", response_class=HTMLResponse)
+async def admin_pharmacies_page(request: Request) -> HTMLResponse:
+    user = require_role(request, "admin")
+    return templates.TemplateResponse(request, "admin_pharmacies.html", {"pharmacies": list_pharmacies(),
+                                                                            "app_name": settings.app_name, "user": user,
+                                                                            "csrf_token": csrf_token(request), "current": "admin"})
 
 
 @app.get("/api/retrieval/similar", response_model=SimilarPrescriptionsResponse)

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ 'Patient' if role == 'patient' else 'Pharmacy' }} registration · {{ app_name }}</title><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-slate-50 text-slate-900"><main class="mx-auto max-w-2xl px-4 py-12">
+  <a href="/login" class="text-sm font-semibold text-teal-700">← Back to sign in</a>
+  <section class="mt-5 rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+    <h1 class="text-2xl font-black">{{ 'Create patient account' if role == 'patient' else 'Register a local pharmacy' }}</h1>
+    <p class="mt-2 text-sm text-slate-600">{% if role == 'pharmacy' %}Your account remains pending until an administrator verifies the pharmacy.{% else %}Upload, understand, and fulfil your existing prescriptions.{% endif %}</p>
+    {% if error %}<p class="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800" role="alert">{{ error }}</p>{% endif %}
+    {% if success %}<p class="mt-4 rounded-xl bg-teal-50 p-3 text-sm text-teal-800" role="status">{{ success }} <a class="font-bold underline" href="/login">Sign in</a></p>{% endif %}
+    <form method="post" class="mt-6 grid gap-4 md:grid-cols-2">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <label class="text-sm font-bold">Full name<input required name="full_name" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" autocomplete="name"></label>
+      <label class="text-sm font-bold">Email<input required type="email" name="email" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" autocomplete="email"></label>
+      <label class="text-sm font-bold">Phone<input required name="phone" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" autocomplete="tel"></label>
+      <label class="text-sm font-bold">PIN code<input required name="pin_code" inputmode="numeric" pattern="[1-9][0-9]{5}" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" autocomplete="postal-code"></label>
+      <label class="text-sm font-bold md:col-span-2">Password<input required type="password" minlength="10" maxlength="256" name="password" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" autocomplete="new-password"></label>
+      {% if role == 'pharmacy' %}
+      <label class="text-sm font-bold">Business name<input required name="business_name" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"></label>
+      <label class="text-sm font-bold">Pharmacy licence number<input required name="license_number" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"></label>
+      <label class="text-sm font-bold md:col-span-2">Address<textarea required name="address" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"></textarea></label>
+      <label class="text-sm font-bold md:col-span-2">Additional serviceable PIN codes<input name="serviceable_pins" placeholder="400001, 400002" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"><span class="mt-1 block text-xs font-normal text-slate-500">Comma-separated; the primary PIN is always included.</span></label>
+      <fieldset class="md:col-span-2"><legend class="text-sm font-bold">Fulfillment</legend><label class="mr-5 text-sm"><input type="checkbox" name="supports_pickup" checked> Pickup</label><label class="text-sm"><input type="checkbox" name="supports_delivery"> Local delivery</label></fieldset>
+      {% endif %}
+      <button class="md:col-span-2 rounded-xl bg-teal-700 px-4 py-3 font-bold text-white" type="submit">{{ 'Create account' if role == 'patient' else 'Submit for approval' }}</button>
+    </form>
+    <p class="mt-5 text-xs leading-5 text-slate-500">The platform helps patients understand and fulfil an existing prescription; it does not perform medical diagnosis.</p>
+  </section>
+</main></body></html>

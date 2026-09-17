@@ -12,6 +12,25 @@ from fastapi import HTTPException, Request
 from .config import settings
 
 
+def hash_password(password: str) -> str:
+    if len(password) < 10 or len(password) > 256:
+        raise ValueError("Password must be between 10 and 256 characters.")
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
+    return f"scrypt$16384$8$1${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        algorithm, n, r, p, salt, expected = encoded.split("$")
+        if algorithm != "scrypt":
+            return False
+        actual = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=int(n), r=int(r), p=int(p))
+        return hmac.compare_digest(actual.hex(), expected)
+    except (ValueError, TypeError):
+        return False
+
+
 def current_user(request: Request) -> dict[str, str] | None:
     user = request.session.get("user")
     return user if isinstance(user, dict) and user.get("id") else None
@@ -37,7 +56,23 @@ def require_edit_role(request: Request) -> dict[str, str] | None:
     return user
 
 
+def require_role(request: Request, *roles: str) -> dict[str, str]:
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if user.get("role") not in roles:
+        raise HTTPException(status_code=403, detail="This account cannot perform that action.")
+    return user
+
+
 def authenticate(email: str, password: str) -> dict[str, str] | None:
+    from .storage import get_user_by_email
+
+    native = get_user_by_email(email.strip().lower())
+    if native and native.get("active") and verify_password(password, str(native.get("password_hash") or "")):
+        if native.get("role") == "pharmacy" and native.get("approval_status") != "approved":
+            return None
+        return {"id": native["id"], "email": native["email"], "role": native["role"], "name": native["full_name"]}
     valid_email = hmac.compare_digest(email.strip().lower(), settings.admin_email.strip().lower())
     valid_password = bool(settings.admin_password) and hmac.compare_digest(password, settings.admin_password)
     if not (valid_email and valid_password):

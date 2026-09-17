@@ -8,7 +8,7 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 def safe_text(value: Any, fallback: str = "Not available") -> str:
@@ -24,6 +24,19 @@ def safe_list(values: Any) -> list[str]:
 
 def display_status(value: Any) -> str:
     return str(value or "needs_review").replace("_", " ").strip().title()
+
+
+def display_timestamp(value: Any) -> str:
+    text = safe_text(value, "Not available")
+    if text == "Not available":
+        return text
+    try:
+        from datetime import datetime
+
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.strftime("%d %b %Y, %H:%M UTC") if parsed.tzinfo else parsed.strftime("%d %b %Y, %H:%M")
+    except ValueError:
+        return text
 
 
 def paragraph(text: str, style: ParagraphStyle) -> Paragraph:
@@ -165,6 +178,7 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
         fontSize=20,
         leading=24,
         textColor=ink,
+        alignment=TA_LEFT,
         spaceAfter=4,
     )
     subheading_style = ParagraphStyle(
@@ -200,7 +214,7 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
     dataset_names = sorted({name for med in medications for name in safe_list(med.get("source_datasets"))})
     file_name = safe_text(analysis.get("filename"), "Prescription Upload")
     report_id = safe_text(analysis.get("id") or analysis.get("analysis_id"))
-    created_at = safe_text(analysis.get("created_at"))
+    created_at = display_timestamp(analysis.get("created_at"))
     raw_text = safe_text(analysis.get("raw_text"), "No OCR text captured.")
     patient_name = safe_text(analysis.get("patient_name"))
     doctor_name = safe_text(analysis.get("doctor_name"))
@@ -279,6 +293,19 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
     story.append(paragraph("Read each direction beside the original prescription. Orange review boxes identify fields that need extra attention.", subheading_style))
     story.append(Spacer(1, 8))
 
+    if not medications:
+        story.append(
+            build_detail_table(
+                [[
+                    paragraph("NO MEDICATIONS STRUCTURED", chip_style),
+                    paragraph("OCR text was captured, but no medicine line could be safely structured. Review the original prescription and retry with a clearer scan.", body_style),
+                ]],
+                col_widths=[48 * mm, 120 * mm],
+                background="#fff7ed",
+            )
+        )
+        story.append(Spacer(1, 10))
+
     for index, med in enumerate(medications, start=1):
         medication_name = safe_text(med.get("name"), "Unknown medication")
         review_reasons = safe_list(med.get("review_reasons"))
@@ -309,8 +336,6 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
         if requires_review:
             review_text = " ".join(f"{position}. {reason}" for position, reason in enumerate(review_reasons, start=1)) or "Confirm this medication against the original prescription."
             medication_card.extend([Spacer(1, 4), paragraph(f"Needs review: {review_text}", warning_style)])
-        story.append(KeepTogether(medication_card))
-
         detail_rows = []
         for label, value in (
             ("Composition", med.get("composition")),
@@ -339,9 +364,11 @@ def build_pdf_report(analysis: dict[str, Any], app_name: str) -> bytes:
                 paragraph("Web/model lookup ran but no names passed local dataset validation.", body_style),
             ])
         if detail_rows:
-            story.extend([Spacer(1, 4), build_detail_table(detail_rows, [38 * mm, 130 * mm], background="#f8fafc")])
-        story.append(Spacer(1, 9))
+            medication_card.extend([Spacer(1, 4), build_detail_table(detail_rows, [38 * mm, 130 * mm], background="#f8fafc")])
+        medication_card.append(Spacer(1, 9))
+        story.append(KeepTogether(medication_card))
 
+    story.append(PageBreak())
     story.append(Spacer(1, 5))
     story.append(paragraph("Verification appendix", title_style))
     story.append(paragraph("Raw OCR extract", heading_style))

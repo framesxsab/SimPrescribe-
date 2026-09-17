@@ -1,15 +1,18 @@
 import asyncio
+import hashlib
 import logging
 import re
+import shutil
+import time
 import uuid
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 from typing import Any
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from .config import settings
 from .inference import structure_medications
@@ -17,8 +20,17 @@ from .ocr import OCRResult, extract_ocr_result, validate_document
 from .reporting import build_pdf_report
 from .retrieval import get_vector_cache
 from .schemas import analysis_output_contract
-from .security import owner_id, public_user_context, require_edit_role, verify_csrf
-from .storage import append_audit_event, get_analysis_record, load_history, try_append_history, update_analysis_record
+from .marketplace import pharmacy_can_access_analysis
+from .security import current_user, owner_id, public_user_context, require_edit_role, require_role, verify_csrf
+from .storage import (
+    append_audit_event,
+    get_analysis_record,
+    get_prescription_file,
+    load_history,
+    save_prescription_file,
+    try_append_history,
+    update_analysis_record,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +44,21 @@ def sanitize_filename(filename: str) -> str:
     basename = Path(filename or "upload").name
     cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", basename)
     return cleaned or "upload"
+
+
+def safe_unlink(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        if path.exists():
+            path.unlink(missing_ok=True)
+    except OSError:
+        time.sleep(0.05)
+        try:
+            if path.exists():
+                path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning(f"Could not immediately delete temporary file {path}")
 
 
 async def save_upload(file: UploadFile) -> Path:
@@ -56,7 +83,7 @@ async def save_upload(file: UploadFile) -> Path:
     try:
         validate_document(file_path)
     except ValueError as exc:
-        file_path.unlink(missing_ok=True)
+        safe_unlink(file_path)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return file_path
 
@@ -78,19 +105,50 @@ async def render_dashboard(request: Request, templates) -> HTMLResponse:
 
 async def render_history(request: Request, templates) -> HTMLResponse:
     owner = owner_id(request)
-    return templates.TemplateResponse(request, "history.html", {"analyses": load_history(owner), "app_name": settings.app_name, **public_user_context(request)})
+    return templates.TemplateResponse(
+        request,
+        "history.html",
+        {
+            "analyses": load_history(owner),
+            "app_name": settings.app_name,
+            **public_user_context(request),
+        },
+    )
 
 
 async def render_details(request: Request, analysis_id: str, templates) -> HTMLResponse:
-    analysis = get_analysis_record(analysis_id, owner_id(request))
+    owner = owner_id(request)
+    analysis = get_analysis_record(analysis_id, owner)
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
-    return templates.TemplateResponse(request, "details.html", {
-        "analysis": analysis,
-        "app_name": settings.app_name,
-        "alternatives_enabled": settings.alternatives_enabled,
-        **public_user_context(request),
-    })
+    user = current_user(request)
+    # In dev mode (no auth), allow editing and patient-flow features
+    can_edit = False
+    show_patient_marketplace = False
+    if user:
+        can_edit = user.get("role") in {"admin", "reviewer"}
+        show_patient_marketplace = user.get("role") == "patient"
+    elif not settings.authentication_enabled:
+        can_edit = True
+        show_patient_marketplace = True
+    breadcrumbs = [
+        {"href": "/", "label": "Dashboard"},
+        {"href": "/history", "label": "Prescriptions"},
+        {"href": "", "label": analysis.get("filename", "Analysis")},
+    ]
+    return templates.TemplateResponse(
+        request,
+        "details.html",
+        {
+            "analysis": analysis,
+            "app_name": settings.app_name,
+            "alternatives_enabled": settings.alternatives_enabled,
+            "can_edit": can_edit,
+            "show_patient_marketplace": show_patient_marketplace,
+            "breadcrumbs": breadcrumbs,
+            **public_user_context(request),
+        },
+    )
 
 
 async def history_payload(request: Request) -> dict[str, Any]:
@@ -134,7 +192,12 @@ async def analyze(
     consent: bool = Form(False),
     csrf: str | None = Form(None),
 ) -> JSONResponse:
-    require_edit_role(request)
+    if settings.authentication_enabled:
+        user = current_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="Authentication required.")
+        if user.get("role") not in {"patient", "admin", "reviewer"}:
+            raise HTTPException(status_code=403, detail="Reviewer role required.")
     owner = owner_id(request)
     verify_csrf(request, request.headers.get("X-CSRF-Token") or csrf)
     if not consent:
@@ -203,6 +266,8 @@ async def analyze(
             "medications": medications,
             "pipeline": pipeline,
             "review_status": "needs_review",
+            "patient_review_status": "needs_review",
+            "patient_review_versions": [],
         })
         stored = try_append_history(record, owner_id=owner)
         if not stored:
@@ -219,7 +284,39 @@ async def analyze(
                 content={"analysis_id": analysis_id, **record},
                 headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
             )
-        append_audit_event(str(uuid.uuid4()), owner, "analysis_created", analysis_id, provider=pipeline.get("used_provider", "unknown"))
+        settings.prescription_storage_dir.mkdir(parents=True, exist_ok=True)
+        storage_name = f"{uuid.uuid4().hex}{stored_file.suffix.lower()}"
+        protected_path = settings.prescription_storage_dir / storage_name
+        try:
+            shutil.copy2(stored_file, protected_path)
+            save_prescription_file({
+                "id": str(uuid.uuid4()),
+                "analysis_id": analysis_id,
+                "owner_id": owner,
+                "storage_name": storage_name,
+                "original_name": record["filename"],
+                "content_type": file.content_type or "application/octet-stream",
+                "sha256": hashlib.sha256(protected_path.read_bytes()).hexdigest(),
+                "created_at": datetime.now(timezone.utc),
+                "expires_at": datetime.now(timezone.utc) + timedelta(days=settings.retention_days),
+            })
+        except Exception:
+            safe_unlink(protected_path)
+            pipeline = dict(record["pipeline"])
+            pipeline["warnings"] = list(pipeline.get("warnings") or []) + [
+                "Original prescription could not be retained; ordering is unavailable."
+            ]
+            pipeline["degraded"] = True
+            pipeline["error_code"] = "PRESCRIPTION_STORAGE_FAILED"
+            record["pipeline"] = pipeline
+            update_analysis_record(analysis_id, owner, record)
+        append_audit_event(
+            str(uuid.uuid4()),
+            owner,
+            "analysis_created",
+            analysis_id,
+            provider=pipeline.get("used_provider", "unknown"),
+        )
         return JSONResponse(
             content={"analysis_id": analysis_id, **record},
             headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
@@ -249,8 +346,7 @@ async def analyze(
             headers={"Cache-Control": "no-store"},
         )
     finally:
-        if stored_file.exists():
-            stored_file.unlink()
+        safe_unlink(stored_file)
 
 
 async def review_analysis(request: Request, analysis_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -290,8 +386,91 @@ async def review_analysis(request: Request, analysis_id: str, payload: dict[str,
     analysis["review_versions"] = review_versions
     if not update_analysis_record(analysis_id, owner, analysis, expected_record=previous_analysis):
         raise HTTPException(status_code=409, detail="Analysis was updated by another reviewer. Reload and try again.")
-    append_audit_event(str(uuid.uuid4()), owner, "analysis_reviewed", analysis_id, status=status, review_version=len(review_versions))
-    return {"analysis_id": analysis_id, "review_status": status, "reviewed_at": analysis["reviewed_at"], "review_version": len(review_versions)}
+    append_audit_event(
+        str(uuid.uuid4()),
+        owner,
+        "analysis_reviewed",
+        analysis_id,
+        status=status,
+        review_version=len(review_versions),
+    )
+    return {
+        "analysis_id": analysis_id,
+        "review_status": status,
+        "reviewed_at": analysis["reviewed_at"],
+        "review_version": len(review_versions),
+    }
+
+
+async def patient_review_analysis(request: Request, analysis_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    user = current_user(request)
+    if settings.authentication_enabled or user is not None:
+        user = require_role(request, "patient")
+        user_id = user["id"]
+    else:
+        user_id = "local"
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    analysis = get_analysis_record(analysis_id, user_id)
+    if analysis is None:
+        analysis = get_analysis_record(analysis_id, "local")
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Prescription analysis not found.")
+    medications = payload.get("medications")
+    status = str(payload.get("status") or "")
+    if status not in {"confirmed", "corrected"} or not isinstance(medications, list) or len(medications) != len(analysis.get("medications") or []):
+        raise HTTPException(status_code=400, detail="Review every extracted medicine before confirmation.")
+    allowed = {"name", "type", "dosage", "frequency", "duration"}
+    cleaned = []
+    for medication in medications:
+        if not isinstance(medication, dict) or not str(medication.get("name") or "").strip():
+            raise HTTPException(status_code=400, detail="Every medicine requires a name.")
+        current = dict(analysis["medications"][len(cleaned)])
+        for field in allowed:
+            if field in medication:
+                current[field] = str(medication[field]).strip()[:500]
+        cleaned.append(current)
+    analysis.setdefault("original_medications", deepcopy(analysis.get("medications") or []))
+    versions = list(analysis.get("patient_review_versions") or [])[:20]
+    versions.append({
+        "recorded_at": utc_now_iso(),
+        "status": analysis.get("patient_review_status", "needs_review"),
+        "medications": deepcopy(analysis.get("medications") or []),
+    })
+    analysis["medications"] = cleaned
+    analysis["patient_review_status"] = status
+    analysis["patient_confirmed_at"] = utc_now_iso()
+    analysis["patient_review_versions"] = versions
+    if not update_analysis_record(analysis_id, user_id, analysis):
+        raise HTTPException(status_code=409, detail="Prescription changed. Reload and try again.")
+    append_audit_event(str(uuid.uuid4()), user_id, "patient_prescription_confirmed", analysis_id, status=status)
+    return {"analysis_id": analysis_id, "patient_review_status": status, "version": len(versions)}
+
+
+async def prescription_source(request: Request, analysis_id: str) -> FileResponse:
+    user = current_user(request)
+    if user is None:
+        if not settings.authentication_enabled:
+            user = {"id": "local", "role": "reviewer"}
+        else:
+            raise HTTPException(status_code=401, detail="Authentication required.")
+    source = get_prescription_file(analysis_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Prescription source not found or expired.")
+    allowed = user["role"] in {"admin", "reviewer"} or source["owner_id"] == user["id"]
+    if user["role"] == "pharmacy":
+        allowed = pharmacy_can_access_analysis(user["id"], analysis_id)
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Prescription source access denied.")
+    path = (settings.prescription_storage_dir / source["storage_name"]).resolve()
+    if path.parent != settings.prescription_storage_dir.resolve() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Prescription source not found or expired.")
+    append_audit_event(str(uuid.uuid4()), user["id"], "prescription_source_viewed", analysis_id)
+    return FileResponse(
+        path,
+        media_type=source["content_type"],
+        filename=source["original_name"],
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def export_audit_csv(events: list[dict[str, Any]]) -> str:
@@ -311,4 +490,3 @@ def export_audit_csv(events: list[dict[str, Any]]) -> str:
             json.dumps(event.get("metadata", {})),
         ])
     return output.getvalue()
-

@@ -1,0 +1,60 @@
+@startuml Consultation_Statechart
+' UML 2 behavioral state machine for classifier Consultation
+' Notation: trigger [guard] / effect
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 13
+skinparam ArrowColor #111827
+skinparam ArrowFontColor #111827
+skinparam ArrowFontSize 12
+skinparam StateBorderColor #111827
+skinparam StateBackgroundColor #FFFFFF
+skinparam StateFontColor #111827
+skinparam StateAttributeFontColor #111827
+skinparam StateAttributeFontSize 12
+skinparam RoundCorner 18
+skinparam padding 8
+skinparam nodesep 50
+skinparam ranksep 45
+hide empty description
+
+title Consultation — UML State Machine\nclassifier: Consultation
+
+[*] --> ConsultationInitiated : patientIdentified
+
+state "Consultation Initiated" as ConsultationInitiated
+state "Examination In Progress" as ExaminationInProgress
+ExaminationInProgress : do / recordSymptoms()
+ExaminationInProgress : do / recordObservations()
+
+ConsultationInitiated --> ExaminationInProgress : startConsultation
+ExaminationInProgress --> DiagnosisRecorded : examinationCompleted / recordDiagnosis()
+
+state "Diagnosis Recorded" as DiagnosisRecorded
+DiagnosisRecorded --> choicePrescription : diagnosisSaved
+
+state choicePrescription <<choice>>
+
+choicePrescription --> ConsultationCompleted : [noPrescriptionRequired]
+choicePrescription --> PrescriptionBeingPrepared : [prescriptionRequired]
+
+state "Prescription Being Prepared" as PrescriptionBeingPrepared
+state "Prescription Validation" as PrescriptionValidation
+PrescriptionValidation : do / validateMedicineDetails()
+state "Prescription Finalized" as PrescriptionFinalized
+
+PrescriptionBeingPrepared --> PrescriptionValidation : medicineDetailsEntered
+PrescriptionValidation --> PrescriptionFinalized : [valid] / finalizePrescription()
+PrescriptionFinalized --> ConsultationCompleted : prescriptionCompleted
+
+state "Consultation Completed" as ConsultationCompleted
+ConsultationCompleted --> [*] : closeConsultation / recordAuditLog()
+
+legend left
+  Transition syntax: trigger [guard] / effect
+  Choice (diamond) evaluates guards on outgoing transitions.
+  Audit logging is an effect, not a state.
+endlegend
+
+@enduml

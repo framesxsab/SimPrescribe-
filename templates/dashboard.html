@@ -176,11 +176,9 @@
                     {{ analysis.medications|length }} medication{% if analysis.medications|length != 1 %}s{% endif %} extracted
                 </p>
                 {% if analysis.pipeline and analysis.pipeline.degraded %}
-                <p class="mt-2 text-xs font-semibold uppercase tracking-wide text-amber-700">Degraded labeled output</p>
+                <p class="mt-2 text-xs font-semibold uppercase tracking-wide text-amber-700">Manual review recommended</p>
                 {% endif %}
-                {% if analysis.pipeline and analysis.pipeline.used_provider %}
-                <p class="mt-1 text-xs text-slate-500">Provider: {{ analysis.pipeline.used_provider }}</p>
-                {% endif %}
+
             </a>
             {% endfor %}
         </div>

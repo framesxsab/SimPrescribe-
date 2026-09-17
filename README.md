@@ -9,11 +9,15 @@ pinned: false
 
 SimpliScribe is a FastAPI application that simplifies prescription reading by extracting text from prescription images or PDFs and turning that OCR output into a structured medication summary.
 
+It also provides an authenticated prescription-first marketplace MVP: patients can confirm the structured result, find approved local pharmacies serving their PIN code, request a pharmacist-verified quote, and track COD pickup or local-delivery fulfillment. Pharmacies manage exact-name inventory and order requests through a dedicated portal.
+
 ## Safety and intended use
 
 SimpliScribe is an open-source **review aid**, not a prescribing, diagnosis, dispensing, or autonomous clinical decision system. Every medicine name, strength, route, frequency, duration, interaction, and dataset reference candidate must be checked against the original prescription by a qualified clinician or pharmacist. The committed golden gate has ten synthetic cases and is a regression check, not evidence of clinical accuracy.
 
-The application preserves OCR line boundaries, exposes OCR confidence and provider provenance, marks uncertain fields for review, validates actual file content, deletes uploads after processing, and labels dataset alternatives as reference candidates rather than recommendations.
+**The platform helps patients understand and fulfil an existing prescription; it does not perform medical diagnosis.** Generic/equivalent entries are informational reference candidates and cannot replace an ordered prescription line automatically.
+
+The application preserves OCR line boundaries, exposes OCR confidence and provider provenance, marks uncertain fields for review, validates actual file content, deletes processing copies after OCR while retaining a protected source for pharmacist verification, and labels dataset alternatives as reference candidates rather than recommendations.
 
 Analyses are stored through SQLAlchemy. Local development defaults to SQLite and can be unauthenticated, so it is strictly a one-user, local-only workflow. Do not expose it to remote or multi-user healthcare traffic. Identifiable data needs authenticated role-based access, encrypted managed storage, audit/retention controls, a threat model, licensed/versioned medicine sources, and prospective clinical validation.
 
@@ -100,6 +104,15 @@ Governance and safety:
 
 ## Local development
 
+Create an approved demo pharmacy and starter exact-name inventory after initializing the database:
+
+```powershell
+.venv\Scripts\python.exe scripts\seed_marketplace.py --password "choose-a-demo-password" --pin 400001
+```
+
+Patient accounts register at `/register/patient`; pharmacies register at `/register/pharmacy` and require approval at `/admin/pharmacies`.
+Patients can open `/marketplace` from the top navigation, choose an analyzed prescription, confirm its medicines, and find pharmacies serving their PIN. The marketplace needs a signed-in patient and at least one approved pharmacy to show results.
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
@@ -115,7 +128,14 @@ INFERENCE_PROVIDER=endpoint
 MODEL_API_URL=http://127.0.0.1:8001/extract
 OCR_LANGUAGE=en
 OCR_USE_GPU=false
+OCR_CACHE_DIR=./tmp/ocr-cache
+# PaddleX 3.4 honors PADDLE_PDX_CACHE_HOME; Paddle 3.3 honors PADDLE_HOME.
+# Leave these unset to derive both locations beneath OCR_CACHE_DIR.
+# PADDLE_HOME=./tmp/ocr-cache/paddle
+# PADDLE_PDX_CACHE_HOME=./tmp/ocr-cache/paddlex
 ```
+
+OCR cache directories are created and write-tested at startup. Paddle/PaddleX model binaries are runtime data and must stay outside the repository (the default `tmp/ocr-cache` is ignored). The application temporarily routes Paddle's legacy `~/.cache/paddle` expansion into this configured directory during reader initialization, then restores the process environment. Set `OCR_CACHE_DIR` (and optionally the two supported Paddle overrides) to a writable encrypted runtime volume in production.
 
 If you do not want to run the local model server yet, keep `INFERENCE_PROVIDER=fallback` and the app will stay fully local with rule-based extraction only.
 
@@ -245,7 +265,7 @@ Requirements reviewed from supplied course material were distilled without copyi
 5. **Unavailable-medicine reference list:** local CSV substitutes and same-composition brands are shown first; optional web/model candidates run only when that list is empty and `ALTERNATIVES_ENABLED=true`.
 6. **Degraded analysis output:** model, OCR-engine, lexicon, database, and PDF failures keep a labeled payload or a documented error code instead of a silent partial result.
 
-These are technical safeguards, not clinical validation. SimpliScribe will not add patient registration, consultation/diagnosis records, automatic treatment decisions, medicine reminders, or drug-interaction decisioning without a separately approved clinical, privacy, and governance design.
+These are technical safeguards, not clinical validation. Patient and approved-pharmacy accounts support prescription fulfillment only; SimpliScribe does not add consultation/diagnosis records, automatic treatment decisions, medicine reminders, or drug-interaction decisioning.
 
 Code is MIT licensed. Dataset files may have separate upstream terms; see [docs/DATASET_PROVENANCE.md](docs/DATASET_PROVENANCE.md) before redistribution.
 
@@ -302,7 +322,7 @@ alembic current
 The `simpliscribe.storage` bootstrap still auto-creates the base tables on first app start (`ensure_schema()`), so local development and the test suite keep working without a manual step. In production, run `alembic upgrade head` as part of the release and evolve the schema by adding a new revision (`alembic revision --autogenerate -m "describe change"`) rather than editing existing ones.
 
 
-The review screen supports correction, confirmation, unreadable rejection, and sign-out for shared workstations. Original uploads are removed after processing, so reviewers must compare against their own source document during the active workflow. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing. See [docs/CONSENT_AND_RETENTION.md](docs/CONSENT_AND_RETENTION.md) and [docs/simpliscribe-threat-model.md](docs/simpliscribe-threat-model.md). Configure request-size limits at the ingress/proxy as well as `MAX_UPLOAD_MB`; multipart bodies reach the server before application validation.
+The review screen supports correction, confirmation, unreadable rejection, and sign-out for shared workstations. Processing copies are removed after OCR; a protected source copy remains only for the patient and authorized pharmacist workflow until retention expiry. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing. See [docs/CONSENT_AND_RETENTION.md](docs/CONSENT_AND_RETENTION.md) and [docs/simpliscribe-threat-model.md](docs/simpliscribe-threat-model.md). Configure request-size limits at the ingress/proxy as well as `MAX_UPLOAD_MB`; multipart bodies reach the server before application validation.
 
 ```bash
 docker build -t simpliscribe .

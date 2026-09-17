@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 from pydantic import BaseModel, Field
 
 HEADER_FIELDS = ("patient_name", "doctor_name", "date")
@@ -61,6 +61,36 @@ class ReviewResponse(BaseModel):
     review_status: str = Field(description="Updated review status.")
     reviewed_at: str = Field(description="ISO timestamp of review.")
     review_version: int = Field(description="Incremental review revision number.")
+
+
+class PatientReviewRequest(BaseModel):
+    status: Literal["confirmed", "corrected"]
+    medications: list[dict[str, Any]] = Field(min_length=1, max_length=50)
+
+
+class InventoryRequest(BaseModel):
+    medicine_name: str = Field(min_length=1, max_length=255)
+    unit_label: str = Field(default="pack", min_length=1, max_length=128)
+    price_paise: int = Field(ge=0)
+    stock_quantity: int = Field(ge=0)
+    active: bool = True
+
+
+class OrderRequest(BaseModel):
+    analysis_id: str
+    pharmacy_id: str
+    fulfillment_mode: Literal["pickup", "delivery"]
+    delivery_address: str = Field(default="", max_length=1000)
+    generic_inquiries: list[int] = Field(default_factory=list, max_length=50)
+
+
+class QuoteRequest(BaseModel):
+    items: list[dict[str, Any]] = Field(min_length=1, max_length=50)
+
+
+class TransitionRequest(BaseModel):
+    status: str = Field(default="", max_length=32)
+    note: str = Field(default="", max_length=1000)
 
 
 def empty_extraction_result() -> dict[str, Any]:

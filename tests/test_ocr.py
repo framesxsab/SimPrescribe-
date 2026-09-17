@@ -8,7 +8,7 @@ import fitz
 import pytest
 from PIL import Image
 
-from simpliscribe.ocr import _collect_paddle_lines, extract_ocr_result, extract_pdf_pages, validate_document
+from simpliscribe.ocr import _collect_paddle_lines, _paddle_runtime_environment, extract_ocr_result, extract_pdf_pages, validate_document
 
 
 def test_collect_paddle_lines_supports_v2_results():
@@ -21,6 +21,47 @@ def test_collect_paddle_lines_supports_v3_results():
     lines = _collect_paddle_lines([{"rec_texts": ["Paracetamol", "OD"], "rec_scores": [0.98, 0.72]}])
     assert [line.text for line in lines] == ["Paracetamol", "OD"]
     assert [line.confidence for line in lines] == [0.98, 0.72]
+
+
+def test_paddle_runtime_environment_uses_configured_cache_and_restores_process(monkeypatch, tmp_path):
+    import os
+
+    from types import SimpleNamespace
+
+    cache = tmp_path / "ocr-cache"
+    monkeypatch.setattr("simpliscribe.ocr.settings", SimpleNamespace(
+        ocr_cache_dir=cache, paddle_home=cache / "paddle", paddlex_cache_home=cache / "paddlex"
+    ))
+    monkeypatch.setenv("USERPROFILE", "original-profile")
+    monkeypatch.delenv("PADDLE_HOME", raising=False)
+    monkeypatch.delenv("PADDLE_PDX_CACHE_HOME", raising=False)
+    with _paddle_runtime_environment():
+        assert os.environ["USERPROFILE"] == str(cache)
+        assert os.environ["HOME"] == str(cache)
+        assert os.environ["PADDLE_HOME"] == str(cache / "paddle")
+        assert os.environ["PADDLE_PDX_CACHE_HOME"] == str(cache / "paddlex")
+        assert cache.is_dir()
+    assert os.environ["USERPROFILE"] == "original-profile"
+    assert "PADDLE_HOME" not in os.environ
+    assert "PADDLE_PDX_CACHE_HOME" not in os.environ
+
+
+def test_settings_rejects_unwritable_ocr_cache_path(tmp_path):
+    from simpliscribe.config import Settings
+
+    cache_file = tmp_path / "not-a-directory"
+    cache_file.write_text("occupied", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="OCR_CACHE_DIR must be writable"):
+        Settings(ocr_cache_dir=cache_file).validate_runtime()
+
+
+def test_settings_rejects_unwritable_paddle_override(tmp_path):
+    from simpliscribe.config import Settings
+
+    cache_file = tmp_path / "not-a-paddle-directory"
+    cache_file.write_text("occupied", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="PADDLE_HOME must be writable"):
+        Settings(paddle_home=cache_file).validate_runtime()
 
 
 def test_validate_document_rejects_spoofed_image(tmp_path):
