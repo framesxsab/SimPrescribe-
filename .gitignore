@@ -1,13 +1,20 @@
 *.env
+.env.*
 !.env.example
 __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+.test-runtime/
 .playwright-cli/
+.playwright-mcp/
+test-results/
+/audit-desktop-*.png
+/output/playwright/patient-flow-audit-*/
 tmp/
 tmp/ocr-cache/
 .venv/
+node_modules/
 archive (3)/
 synthetic_prescription_dataset/
 uploads/*
@@ -19,6 +26,9 @@ data/analysis_history.json
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/medicine_lexicon.sqlite
+data/medicine_lexicon.sqlite-shm
+data/medicine_lexicon.sqlite-wal
 data/benchmark_runs/
 data/coverage.xml
 .coverage

@@ -19,15 +19,15 @@
     <main id="main-content" class="max-w-6xl mx-auto px-6 py-10">
         <div class="flex items-end justify-between gap-4 mb-8">
             <div>
-                <p class="text-sm uppercase tracking-[0.12em] text-slate-500 font-semibold">Saved analyses</p>
-                <h1 class="text-3xl font-extrabold tracking-tight">Prescription analysis history</h1>
+                <p class="text-sm uppercase tracking-[0.12em] text-slate-500 font-semibold">Your prescriptions</p>
+                <h1 class="text-3xl font-extrabold tracking-tight">Prescription history</h1>
             </div>
             <div class="flex items-center gap-2">
-                <a href="/api/audit/export?format=csv" download class="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition-colors shadow-sm">
+                {% if user and user.role != 'patient' %}<a href="/api/audit/export?format=csv" download class="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition-colors shadow-sm">
                     <span class="material-symbols-outlined text-base">download</span>
                     Export Audit Log (CSV)
-                </a>
-                <a href="/" class="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 transition-colors">New Analysis</a>
+                </a>{% endif %}
+                <a href="/" class="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 transition-colors">Upload prescription</a>
             </div>
         </div>
 
@@ -35,7 +35,7 @@
         <div class="mb-6 grid gap-3 sm:grid-cols-[1fr_auto]">
             <label class="block">
                 <span class="sr-only">Search analyses</span>
-                <input id="history-search" type="search" placeholder="Search file, patient, prescriber, or medicine" class="w-full rounded-xl border-slate-300 px-4 py-2.5 text-sm shadow-sm focus:border-slate-900 focus:ring-slate-900">
+                <input id="history-search" type="search" placeholder="Search your prescriptions" class="w-full rounded-xl border-slate-300 px-4 py-2.5 text-sm shadow-sm focus:border-slate-900 focus:ring-slate-900">
             </label>
             <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <span>Review status</span>
@@ -57,10 +57,10 @@
                 <div class="flex flex-col gap-5">
                     <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                         <div>
-                            <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{{ analysis.created_at }}</p>
-                            <h2 class="mt-1 text-xl font-bold text-slate-900">{{ analysis.filename }}</h2>
+                            <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{{ analysis.created_at|patient_datetime }}</p>
+                            <h2 class="mt-1 text-xl font-bold text-slate-900">{{ analysis.filename or 'Prescription' }}</h2>
                             <p class="mt-2 text-sm text-slate-600">
-                                {{ analysis.medications|length }} medication{% if analysis.medications|length != 1 %}s{% endif %} extracted
+                                {{ analysis.medications|length }} medication{% if analysis.medications|length != 1 %}s{% endif %} found
                             </p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2">
@@ -73,8 +73,8 @@
                             {% else %}
                             <span class="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-800">Needs review</span>
                             {% endif %}
-                            <span class="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">{{ analysis.medications|length }} meds</span>
-                            <span class="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">{{ analysis.medications|length }} medicines</span>
+                            {% if user and user.role != 'patient' %}<span class="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
                                 {% set ns = namespace(sources=[]) %}
                                 {% for med in analysis.medications %}
                                     {% for source in med.source_datasets or [] %}
@@ -84,15 +84,15 @@
                                     {% endfor %}
                                 {% endfor %}
                                 {{ ns.sources|length }} data source{% if ns.sources|length != 1 %}s{% endif %}
-                            </span>
-                            {% if analysis.pipeline and analysis.pipeline.degraded %}
+                            </span>{% endif %}
+                            {% if user and user.role != 'patient' and analysis.pipeline and analysis.pipeline.degraded %}
                             <span class="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-800">Degraded</span>
                             {% endif %}
-                            {% if analysis.pipeline and analysis.pipeline.used_provider %}
+                            {% if user and user.role != 'patient' and analysis.pipeline and analysis.pipeline.used_provider %}
                             <span class="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">{{ analysis.pipeline.used_provider }}</span>
                             {% endif %}
                             <a href="/details/{{ analysis.id }}" class="inline-flex items-center justify-center rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 hover:border-slate-900 hover:text-slate-900">
-                                View Details
+                                Open review
                             </a>
                         </div>
                     </div>
@@ -104,7 +104,7 @@
                             <div class="flex items-start justify-between gap-3">
                                 <div>
                                     <div class="flex flex-wrap items-center gap-2 mb-2">
-                                        <span class="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-700 border border-slate-200">{{ med.source or 'OCR only' }}</span>
+                                        {% if user and user.role != 'patient' %}<span class="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-700 border border-slate-200">{{ med.source or 'Not matched' }}</span>{% endif %}
                                         <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-700">{{ med.type }}</span>
                                     </div>
                                     <h3 class="text-base font-bold text-slate-900">{{ med.name }}</h3>
@@ -117,28 +117,28 @@
                             </div>
                             <div class="mt-4 grid gap-3 sm:grid-cols-2">
                                 <div>
-                                    <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Composition</p>
+                                    <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">What it contains</p>
                                     <p class="mt-2 text-sm leading-6 text-slate-700">{{ med.composition or 'Not available' }}</p>
                                 </div>
                                 <div>
-                                    <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">If unavailable (local dataset)</p>
+                                    <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Possible options to discuss</p>
                                     <div class="mt-2 flex flex-wrap gap-2">
                                         {% if med.substitutes %}
                                             {% for item in med.substitutes[:3] %}
                                             <span class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{{ item }}</span>
                                             {% endfor %}
                                         {% elif med.alternatives_lookup and med.alternatives_lookup.skipped_reason == 'lookup_disabled' %}
-                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">Local list empty. Web/model lookup is off.</span>
+                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No additional options are listed.</span>
                                         {% elif med.alternatives_lookup and med.alternatives_lookup.skipped_reason == 'no_validated_candidates' %}
-                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No validated web/model candidates</span>
+                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No additional options could be verified.</span>
                                         {% else %}
-                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No dataset reference candidates</span>
+                                            <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">No additional options are listed.</span>
                                         {% endif %}
                                     </div>
                                 </div>
                                 {% if med.web_alternatives %}
                                 <div>
-                                    <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-indigo-500">If unavailable (web/model)</p>
+                                    <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-indigo-500">Other options to discuss</p>
                                     <div class="mt-2 flex flex-wrap gap-2">
                                         {% for item in med.web_alternatives[:3] %}
                                         <span class="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{{ item.name }}</span>

@@ -1,5 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
+import subprocess
+import sys
 from threading import Lock
 from time import sleep
 from types import SimpleNamespace
@@ -8,6 +11,7 @@ import fitz
 import pytest
 from PIL import Image
 
+from simpliscribe import ocr
 from simpliscribe.ocr import _collect_paddle_lines, _paddle_runtime_environment, extract_ocr_result, extract_pdf_pages, validate_document
 
 
@@ -15,6 +19,45 @@ def test_collect_paddle_lines_supports_v2_results():
     results = [[[[[0, 0]], ("Paracetamol 650 mg", 0.93)]]]
     lines = _collect_paddle_lines(results)
     assert [(line.text, line.confidence) for line in lines] == [("Paracetamol 650 mg", 0.93)]
+
+
+def test_ocr_reader_initializes_once_under_concurrent_first_access(monkeypatch):
+    calls = 0
+
+    class FakePaddleOCR:
+        def __init__(self, **_kwargs):
+            nonlocal calls
+            calls += 1
+
+    monkeypatch.setattr(ocr, "_ocr_reader", None)
+    monkeypatch.setitem(sys.modules, "paddleocr", SimpleNamespace(PaddleOCR=FakePaddleOCR))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        readers = list(executor.map(lambda _item: ocr.get_ocr_reader(), range(4)))
+
+    assert calls == 1
+    assert all(reader is readers[0] for reader in readers)
+
+
+def test_ocr_warmup_failure_can_recover_without_restart(monkeypatch):
+    calls = 0
+
+    class FlakyPaddleOCR:
+        def __init__(self, **_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls < 5:
+                raise ValueError("synthetic model failure")
+
+    monkeypatch.setattr(ocr, "_ocr_reader", None)
+    monkeypatch.setattr(ocr, "_ocr_state", "not_started")
+    monkeypatch.setattr(ocr, "_ocr_error_code", None)
+    monkeypatch.setitem(sys.modules, "paddleocr", SimpleNamespace(PaddleOCR=FlakyPaddleOCR))
+
+    assert ocr.warm_ocr_reader() is False
+    assert ocr.get_ocr_state()["state"] == "failed"
+    assert ocr.warm_ocr_reader() is True
+    assert ocr.get_ocr_state()["ready"] is True
 
 
 def test_collect_paddle_lines_supports_v3_results():
@@ -44,6 +87,55 @@ def test_paddle_runtime_environment_uses_configured_cache_and_restores_process(m
     assert os.environ["USERPROFILE"] == "original-profile"
     assert "PADDLE_HOME" not in os.environ
     assert "PADDLE_PDX_CACHE_HOME" not in os.environ
+
+
+def test_settings_resolves_relative_ocr_paths_from_project_root(tmp_path):
+    from simpliscribe.config import BASE_DIR, Settings
+
+    relative = Settings(
+        ocr_cache_dir=Path("tmp/relative-ocr-cache"),
+        paddle_home=Path("tmp/relative-ocr-cache/paddle"),
+        paddlex_cache_home=Path("tmp/relative-ocr-cache/paddlex"),
+    )
+    assert relative.ocr_cache_dir == (BASE_DIR / "tmp/relative-ocr-cache").resolve()
+    assert relative.paddle_home == (BASE_DIR / "tmp/relative-ocr-cache/paddle").resolve()
+    assert relative.paddlex_cache_home == (BASE_DIR / "tmp/relative-ocr-cache/paddlex").resolve()
+
+    absolute_cache = tmp_path / "absolute-ocr-cache"
+    absolute = Settings(
+        ocr_cache_dir=absolute_cache,
+        paddle_home=absolute_cache / "paddle",
+        paddlex_cache_home=absolute_cache / "paddlex",
+    )
+    assert absolute.ocr_cache_dir == absolute_cache
+    assert absolute.paddle_home == absolute_cache / "paddle"
+    assert absolute.paddlex_cache_home == absolute_cache / "paddlex"
+
+
+def test_clean_subprocess_resolves_relative_ocr_cache_from_project_root(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment.update({
+        "APP_ENV": "test",
+        "OCR_CACHE_DIR": "tmp/subprocess-ocr-cache",
+        "PADDLE_HOME": "tmp/subprocess-ocr-cache/paddle",
+        "PADDLE_PDX_CACHE_HOME": "tmp/subprocess-ocr-cache/paddlex",
+        "PYTHONPATH": str(root),
+    })
+    result = subprocess.run(
+        [sys.executable, "-c", "from simpliscribe.config import settings; print(settings.ocr_cache_dir); print(settings.paddle_home); print(settings.paddlex_cache_home)"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    paths = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+    assert paths == [
+        (root / "tmp/subprocess-ocr-cache").resolve(),
+        (root / "tmp/subprocess-ocr-cache/paddle").resolve(),
+        (root / "tmp/subprocess-ocr-cache/paddlex").resolve(),
+    ]
 
 
 def test_settings_rejects_unwritable_ocr_cache_path(tmp_path):

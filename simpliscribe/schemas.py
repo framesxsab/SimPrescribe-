@@ -24,6 +24,9 @@ class HealthResponse(BaseModel):
     provider_ready: bool = Field(description="Whether the configured inference credentials/model are ready.")
     clinical_use: str = Field(default="human_review_required", description="Clinical safety statement.")
     authentication_required: bool = Field(description="Whether session/OIDC auth is enforced.")
+    ocr_state: str = Field(default="not_started", description="OCR engine lifecycle state.")
+    ocr_ready: bool = Field(default=False, description="Whether the OCR engine is ready for inference.")
+    ocr_error_code: str | None = Field(default=None, description="Safe OCR readiness error code, if failed.")
 
 
 class SimilarPrescriptionItem(BaseModel):

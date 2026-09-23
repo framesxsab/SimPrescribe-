@@ -199,7 +199,7 @@ def try_append_history(record: dict[str, Any], limit: int = 25, owner_id: str = 
             append_history(record, limit=limit, owner_id=owner_id)
             return True
         except Exception:
-            logger.exception("Failed to persist analysis history.")
+            logger.warning("Failed to persist analysis history; error_code=STORAGE_FAILED")
     return False
 
 
@@ -533,4 +533,3 @@ def seed_test_pharmacies() -> None:
             logger.info("  Seeded: %s (%s)", config["business_name"], config["pin_code"])
         except Exception:
             logger.warning("  Skipping %s (already exists or error)", config["business_name"])
-

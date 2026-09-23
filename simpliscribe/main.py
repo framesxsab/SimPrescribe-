@@ -3,6 +3,7 @@ import json
 import time
 import uuid
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
@@ -18,7 +19,8 @@ from .marketplace import MarketplaceConflict, accept_order, cancel_order, create
 from .schemas import CacheStatsResponse, HealthResponse, InventoryRequest, LiveResponse, OrderRequest, PatientReviewRequest, QuoteRequest, SimilarPrescriptionsResponse, TransitionRequest
 from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, hash_password, oidc_authorization_url, owner_id, require_edit_role, require_role, verify_csrf
 from .storage import append_audit_event, create_user, ensure_schema, get_analysis_record, get_pharmacy_by_user, get_user, get_user_by_email, load_audit_events, load_history, list_pharmacies, ping_database, purge_expired_marketplace, seed_test_pharmacies, set_pharmacy_approval
-from .web import analyze, download_report, export_audit_csv, history_payload, patient_review_analysis, prescription_source, render_dashboard, render_details, render_history, review_analysis
+from .ocr import get_ocr_state, warm_ocr_reader
+from .web import analyze, download_report, export_audit_csv, history_payload, patient_review_analysis, prescription_source, render_dashboard, render_details, render_history, retry_processing, review_analysis, save_patient_draft, start_analysis
 
 settings.validate_runtime()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -33,9 +35,40 @@ for expired_name in purge_expired_marketplace()[0]:
         pass
 load_history()
 
-app = FastAPI(title=f"{settings.app_name} API")
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    if settings.app_env.strip().lower() == "test":
+        yield
+        return
+    application.state.ocr_warmup_task = asyncio.create_task(asyncio.to_thread(warm_ocr_reader))
+    try:
+        yield
+    finally:
+        task = getattr(application.state, "ocr_warmup_task", None)
+        if task and not task.done():
+            task.cancel()
+
+
+app = FastAPI(title=f"{settings.app_name} API", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+
+
+def format_patient_datetime(value: object) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        local = parsed.astimezone()
+        hour = local.strftime("%I").lstrip("0") or "12"
+        return f"{local.day} {local.strftime('%b %Y')}, {hour}:{local:%M} {local:%p}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+templates.env.filters["patient_datetime"] = format_patient_datetime
 _request_times: dict[str, deque[float]] = defaultdict(deque)
 _login_times: dict[str, deque[float]] = defaultdict(deque)
 _MAX_BUCKETS = 4096
@@ -129,14 +162,18 @@ async def health() -> dict:
         settings.hf_token if settings.inference_provider == "huggingface" else settings.model_api_url
     )
     database_ready = ping_database()
+    ocr = get_ocr_state()
     return {
-        "status": "ready" if datasets_ready and provider_ready and database_ready else "degraded",
+        "status": "ready" if datasets_ready and provider_ready and database_ready and ocr["ready"] else "degraded",
         "datasets_ready": datasets_ready,
         "database_ready": database_ready,
         "configured_provider": settings.inference_provider,
         "provider_ready": provider_ready,
         "clinical_use": "human_review_required",
         "authentication_required": settings.authentication_enabled,
+        "ocr_state": ocr["state"],
+        "ocr_ready": ocr["ready"],
+        "ocr_error_code": ocr["error_code"],
     }
 
 
@@ -306,9 +343,37 @@ async def analyze_prescription(request: Request, file: UploadFile, consent: bool
         return await analyze(request, file, consent, csrf)
 
 
+@app.post("/api/analyses/start")
+async def start_prescription(request: Request, file: UploadFile, consent: bool = Form(False), csrf: str | None = Form(None)):
+    key = _rate_limit_key(request)
+    if not _consume_bucket(_request_times, key, time.monotonic(), 60, 10):
+        return JSONResponse(status_code=429, content={"detail": "Too many analysis requests. Try again later."})
+    return await start_analysis(request, file, consent, csrf)
+
+
+@app.get("/api/analyses/{analysis_id}/status")
+async def prescription_status(request: Request, analysis_id: str):
+    analysis = get_analysis_record(analysis_id, owner_id(request))
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Prescription analysis not found.")
+    return {"analysis_id": analysis_id, "prescription_state": analysis.get("prescription_state", "review_required"),
+            "processing_stage": analysis.get("processing_stage", ""), "error_code": analysis.get("error_code")}
+
+
+@app.post("/api/analyses/{analysis_id}/process")
+async def process_prescription(request: Request, analysis_id: str):
+    async with _analysis_slots:
+        return await retry_processing(request, analysis_id, allow_uploaded=True)
+
+
 @app.get("/api/report/{analysis_id}")
 async def get_report(request: Request, analysis_id: str):
     return await download_report(request, analysis_id)
+
+
+@app.post("/api/analyses/{analysis_id}/retry")
+async def retry_prescription(request: Request, analysis_id: str):
+    return await retry_processing(request, analysis_id)
 
 
 @app.patch("/api/analyses/{analysis_id}/review")
@@ -319,6 +384,11 @@ async def review(request: Request, analysis_id: str):
 @app.patch("/api/analyses/{analysis_id}/patient-review")
 async def patient_review(request: Request, analysis_id: str, payload: PatientReviewRequest):
     return await patient_review_analysis(request, analysis_id, payload.model_dump())
+
+
+@app.patch("/api/analyses/{analysis_id}/patient-draft")
+async def patient_draft(request: Request, analysis_id: str):
+    return await save_patient_draft(request, analysis_id, await request.json())
 
 
 @app.get("/api/analyses/{analysis_id}/source")
@@ -345,7 +415,7 @@ async def find_pharmacies(request: Request, analysis_id: str, pin: str | None = 
         analysis = get_analysis_record(analysis_id, user["id"])
         if not analysis or not profile:
             raise HTTPException(status_code=404, detail="Prescription analysis not found.")
-        if analysis.get("patient_review_status") not in {"confirmed", "corrected"}:
+        if analysis.get("patient_review_status") not in {"confirmed", "corrected"} or analysis.get("prescription_state", "confirmed") != "confirmed":
             raise HTTPException(status_code=409, detail="Confirm the prescription before finding pharmacies.")
         search_pin = (pin or profile.get("pin_code") or "").strip()
         return {"pharmacies": matching_pharmacies(search_pin, [item.get("name", "") for item in analysis.get("medications", [])])}
@@ -354,6 +424,8 @@ async def find_pharmacies(request: Request, analysis_id: str, pin: str | None = 
     analysis = get_analysis_record(analysis_id, "local") or get_analysis_record(analysis_id)
     if not analysis:
         raise HTTPException(status_code=404, detail="Prescription analysis not found.")
+    if analysis.get("patient_review_status") not in {"confirmed", "corrected"} or analysis.get("prescription_state", "confirmed") != "confirmed":
+        raise HTTPException(status_code=409, detail="Confirm the prescription before finding pharmacies.")
     search_pin = (pin or "560001").strip()
     return {"pharmacies": matching_pharmacies(search_pin, [item.get("name", "") for item in analysis.get("medications", [])])}
 

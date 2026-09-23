@@ -77,6 +77,13 @@ class Settings:
     model_server_api_key: str = os.environ.get("MODEL_SERVER_API_KEY", "").strip()
     model_server_max_input_chars: int = int(os.environ.get("MODEL_SERVER_MAX_INPUT_CHARS", "20000"))
 
+    def __post_init__(self) -> None:
+        for field_name in ("ocr_cache_dir", "paddle_home", "paddlex_cache_home"):
+            configured = Path(getattr(self, field_name))
+            if not configured.is_absolute():
+                configured = (BASE_DIR / configured).resolve()
+            object.__setattr__(self, field_name, configured)
+
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024

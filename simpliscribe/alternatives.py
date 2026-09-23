@@ -24,6 +24,7 @@ from huggingface_hub import InferenceClient
 from .config import settings
 from .inference import (
     find_medicine_match,
+    hydrate_medicine_entry,
     is_junk_medication,
     load_medicine_lexicon,
     normalize_llm_json,
@@ -131,6 +132,7 @@ def dataset_reference_candidates(medicine_name: str, existing: list[str] | None 
     entry = match.entry if match else load_medicine_lexicon().get(query)
     if entry is None:
         return names[:cap]
+    entry = hydrate_medicine_entry(entry)
     for item in entry.substitutes:
         add(item)
         if len(names) >= cap:
@@ -310,7 +312,7 @@ def fetch_alternatives(medicine_name: str) -> list[dict[str, str]]:
             for item in provider(name):
                 merged.setdefault(item["name"], item)
         except Exception:
-            logger.exception("Alternatives %s tier failed for %s.", tier, name)
+            logger.warning("Alternatives provider failed; provider=%s error_code=ALTERNATIVES_FAILED", tier)
     items = list(merged.values())[: settings.alternatives_max_candidates]
     _cache_set(key, items)
     return items
@@ -333,7 +335,7 @@ def _lookup_status(*, local: list[str], web: list[dict[str, str]] | None, ran_we
     }
 
 
-def attach_alternative_candidates(payload: dict[str, Any]) -> dict[str, Any]:
+def attach_alternative_candidates(payload: dict[str, Any], *, allow_web: bool = True) -> dict[str, Any]:
     """Attach local dataset peers always, then optional model/web candidates when those are absent."""
     existing = payload.get("substitutes") if isinstance(payload.get("substitutes"), list) else []
     local = dataset_reference_candidates(str(payload.get("name") or ""), existing)
@@ -347,7 +349,7 @@ def attach_alternative_candidates(payload: dict[str, Any]) -> dict[str, Any]:
         reasons = payload.setdefault("review_reasons", [])
         if reason not in reasons:
             reasons.append(reason)
-    elif web_enabled:
+    elif web_enabled and allow_web:
         ran_web = True
         web = fetch_alternatives(str(payload.get("name") or ""))
         if web:
@@ -358,6 +360,8 @@ def attach_alternative_candidates(payload: dict[str, Any]) -> dict[str, Any]:
             if web_reason not in reasons:
                 reasons.append(web_reason)
     lookup = _lookup_status(local=local, web=web, ran_web=ran_web, web_enabled=web_enabled)
+    if web_enabled and not allow_web and not local:
+        lookup["skipped_reason"] = "deferred_until_requested"
     payload["alternatives_lookup"] = lookup
     if local:
         payload["alternatives_status"] = "local_dataset"

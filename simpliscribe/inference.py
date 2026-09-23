@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import httpx
@@ -15,6 +16,9 @@ from .config import settings
 from .schemas import build_pipeline_metadata, coerce_extraction_result, empty_extraction_result
 
 logger = logging.getLogger(__name__)
+_lexicon_lock = Lock()
+_optional_reference_lock = Lock()
+_persistent_index_lock = Lock()
 
 DEFAULT_INSIGHT = "Use this medication exactly as prescribed and confirm unclear instructions with your clinician."
 
@@ -186,15 +190,20 @@ def compact_composition(*parts: str) -> str:
 
 def clean_value(value: str | None) -> str:
     text = str(value or "").strip()
-    if text.upper() == "NA":
+    if not text or text.upper() == "NA":
         return ""
+    if " " not in text and "\t" not in text and "\n" not in text and "\r" not in text:
+        return text
     return re.sub(r"\s+", " ", text)
 
 
 def collect_series(row: dict[str, Any], prefix: str, limit: int) -> tuple[str, ...]:
     values: list[str] = []
     for index in range(limit):
-        value = clean_value(row.get(f"{prefix}{index}"))
+        raw = row.get(f"{prefix}{index}")
+        if not raw:
+            continue
+        value = clean_value(raw)
         if value and value not in values:
             values.append(value)
     return tuple(values)
@@ -231,29 +240,40 @@ def merge_entries(existing: MedicineEntry | None, incoming: MedicineEntry) -> Me
     )
 
 
+def _dataset_rows(path: Path):
+    if path.exists():
+        with path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
+            yield from csv.DictReader(handle)
+
+
 @lru_cache(maxsize=1)
 def _load_medicine_lexicon() -> dict[str, MedicineEntry]:
     alias_to_key: dict[str, str] = {}
     entries: dict[str, MedicineEntry] = {}
+    normalized_cache: dict[str, str] = {}
+
+    def normalize_cached(value: str) -> str:
+        key = str(value)
+        try:
+            return normalized_cache[key]
+        except KeyError:
+            normalized = normalize_text(value)
+            normalized_cache[key] = normalized
+            return normalized
 
     def add_alias(alias: str, key: str) -> None:
-        normalized = normalize_text(alias)
+        normalized = normalize_cached(alias)
         if normalized and normalized not in alias_to_key:
             alias_to_key[normalized] = key
 
     def upsert_entry(entry: MedicineEntry) -> str:
-        key = normalize_text(entry.name)
+        key = normalize_cached(entry.name)
         if not key:
             return ""
         entries[key] = merge_entries(entries.get(key), entry)
         return key
 
-    def rows(path: Path):
-        if path.exists():
-            with path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
-                yield from csv.DictReader(handle)
-
-    for row in rows(settings.india_medicine_dataset):
+    for row in _dataset_rows(settings.india_medicine_dataset):
         name = clean_value(row.get("name"))
         if not name:
             continue
@@ -285,11 +305,10 @@ def _load_medicine_lexicon() -> dict[str, MedicineEntry]:
         short_alias = re.sub(r"\b(tablet|capsule|syrup|cream|suspension|injection|oral suspension)\b", "", name, flags=re.IGNORECASE).strip()
         add_alias(short_alias, key)
 
-    for row in rows(settings.medicine_database_dataset):
+    for row in _dataset_rows(settings.medicine_database_dataset):
         name = clean_value(row.get("name"))
         if not name:
             continue
-        substitutes = collect_series(row, "substitute", 5)
         entry = MedicineEntry(
             name=title_case(name),
             composition="",
@@ -300,9 +319,9 @@ def _load_medicine_lexicon() -> dict[str, MedicineEntry]:
             therapeutic_class=clean_value(row.get("Therapeutic Class")),
             chemical_class=clean_value(row.get("Chemical Class")),
             action_class=clean_value(row.get("Action Class")),
-            substitutes=substitutes,
-            uses=collect_series(row, "use", 5),
-            side_effects=collect_series(row, "sideEffect", 42),
+            substitutes=(),
+            uses=(),
+            side_effects=(),
             sources=("Medicine Database",),
         )
         key = upsert_entry(entry)
@@ -316,11 +335,59 @@ def _load_medicine_lexicon() -> dict[str, MedicineEntry]:
 
 
 def load_medicine_lexicon() -> dict[str, MedicineEntry]:
-    try:
-        return _load_medicine_lexicon()
-    except Exception:
-        logger.exception("Medicine lexicon failed to load; dataset matching will be skipped.")
-        return {}
+    with _lexicon_lock:
+        try:
+            return _load_medicine_lexicon()
+        except Exception:
+            logger.warning("Medicine lexicon failed to load; error_code=LEXICON_FAILED")
+            return {}
+
+
+OPTIONAL_REFERENCE_FIELDS = ("substitutes", "uses", "side_effects")
+
+
+@lru_cache(maxsize=1)
+def _load_optional_reference_fields() -> dict[str, dict[str, tuple[str, ...]]]:
+    fields: dict[str, dict[str, tuple[str, ...]]] = {}
+    for row in _dataset_rows(settings.medicine_database_dataset):
+        name = clean_value(row.get("name"))
+        if not name:
+            continue
+        key = normalize_text(name)
+        current = fields.setdefault(key, {field: () for field in OPTIONAL_REFERENCE_FIELDS})
+        for output, prefix, limit in (("substitutes", "substitute", 5), ("uses", "use", 5), ("side_effects", "sideEffect", 42)):
+            values = collect_series(row, prefix, limit)
+            current[output] = tuple(dict.fromkeys((*current[output], *values)))
+    return fields
+
+
+def load_optional_reference_fields() -> dict[str, dict[str, tuple[str, ...]]]:
+    with _optional_reference_lock:
+        return _load_optional_reference_fields()
+
+
+def hydrate_medicine_entry(entry: MedicineEntry | None) -> MedicineEntry | None:
+    if entry is None or any(getattr(entry, field) for field in OPTIONAL_REFERENCE_FIELDS):
+        return entry
+    optional = load_optional_reference_fields().get(normalize_text(entry.name))
+    if not optional:
+        return entry
+    return merge_entries(entry, MedicineEntry(
+        name=entry.name, composition="", category="", dosage_form="", manufacturer="", pack_size="",
+        therapeutic_class="", chemical_class="", action_class="",
+        substitutes=optional["substitutes"], uses=optional["uses"], side_effects=optional["side_effects"], sources=(),
+    ))
+
+
+def hydrate_medication_references(medications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for medication in medications:
+        match = find_medicine_match(str(medication.get("name") or ""))
+        entry = hydrate_medicine_entry(match.entry if match else None)
+        reference = dataset_payload(entry, match, include_optional=True)
+        for field in OPTIONAL_REFERENCE_FIELDS:
+            if reference[field] and not medication.get(field):
+                medication[field] = reference[field]
+    return medications
 
 
 @lru_cache(maxsize=1)
@@ -331,7 +398,70 @@ def medicine_prefix_index() -> dict[str, tuple[str, ...]]:
     return {prefix: tuple(aliases) for prefix, aliases in grouped.items()}
 
 
+@lru_cache(maxsize=1)
+def _load_persistent_lexicon_index():
+    from .lexicon_index import default_index_path, open_current_index
+
+    if settings.app_env.strip().lower() == "test":
+        return None
+    path = default_index_path()
+    index = open_current_index(path)
+    if index is None and path.exists():
+        logger.warning("Required lexicon index is missing or stale; using CSV construction", extra={"error_code": "LEXICON_INDEX_STALE"})
+    return index
+
+
+def load_persistent_lexicon_index():
+    with _persistent_index_lock:
+        return _load_persistent_lexicon_index()
+
+
+def _entry_from_index_row(row: dict[str, Any]) -> MedicineEntry:
+    return MedicineEntry(
+        name=str(row["name"]),
+        composition=str(row["composition"]),
+        category=str(row["category"]),
+        dosage_form=str(row["dosage_form"]),
+        manufacturer=str(row["manufacturer"]),
+        pack_size=str(row["pack_size"]),
+        therapeutic_class=str(row["therapeutic_class"]),
+        chemical_class=str(row["chemical_class"]),
+        action_class=str(row["action_class"]),
+        substitutes=(),
+        uses=(),
+        side_effects=(),
+        sources=tuple(row["sources"]),
+    )
+
+
+def _find_medicine_match_from_index(segment: str, index) -> MedicineMatch | None:
+    candidates = build_match_candidates(segment)
+    if not candidates:
+        return None
+    for candidate in candidates:
+        row = index.exact(candidate)
+        if row is not None:
+            return MedicineMatch(_entry_from_index_row(row), 1.0, "exact", candidate)
+    best_entry: MedicineEntry | None = None
+    best_score = 0.0
+    best_alias = ""
+    for candidate in candidates:
+        prefix = candidate[:3] if len(candidate) >= 3 else candidate
+        for alias, row in index.prefix(prefix):
+            score = SequenceMatcher(None, candidate, alias).ratio()
+            if score > best_score:
+                best_score = score
+                best_entry = _entry_from_index_row(row)
+                best_alias = alias
+    if best_entry is not None and best_score >= 0.92:
+        return MedicineMatch(best_entry, best_score, "fuzzy", best_alias)
+    return None
+
+
 def find_medicine_match(segment: str) -> MedicineMatch | None:
+    persistent_index = load_persistent_lexicon_index()
+    if persistent_index is not None:
+        return _find_medicine_match_from_index(segment, persistent_index)
     lexicon = load_medicine_lexicon()
     if not lexicon:
         return None
@@ -496,7 +626,9 @@ def build_insight(entry: MedicineEntry | None, frequency: str, duration: str, fo
     return " ".join(parts)
 
 
-def dataset_payload(entry: MedicineEntry | None, match: MedicineMatch | None = None) -> dict[str, Any]:
+def dataset_payload(entry: MedicineEntry | None, match: MedicineMatch | None = None, *, include_optional: bool = True) -> dict[str, Any]:
+    if include_optional:
+        entry = hydrate_medicine_entry(entry)
     if entry is None:
         return {
             "source": "OCR only",
@@ -658,6 +790,7 @@ def build_medication_record(
     insight: str,
     entry: MedicineEntry | None,
     match: MedicineMatch | None = None,
+    include_optional: bool = True,
 ) -> dict[str, Any]:
     resolved_category = category.strip() or "General"
     if resolved_category.lower() == "general" and entry and entry.category:
@@ -689,7 +822,7 @@ def build_medication_record(
         review_reasons.append("Frequency was not captured.")
     payload["requires_review"] = bool(review_reasons)
     payload["review_reasons"] = review_reasons
-    payload.update(dataset_payload(entry, match))
+    payload.update(dataset_payload(entry, match, include_optional=include_optional))
     return payload
 
 
@@ -897,7 +1030,7 @@ def enrich_medications(medications: list[dict[str, Any]]) -> list[dict[str, Any]
 def _attach_alternatives(payload: dict[str, Any]) -> dict[str, Any]:
     from .alternatives import attach_alternative_candidates  # deferred to avoid circular import
 
-    return attach_alternative_candidates(payload)
+    return attach_alternative_candidates(payload, allow_web=False)
 
 
 def refine_model_medications(raw_text: str, medications: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1043,21 +1176,18 @@ def fallback_extract(raw_text: str) -> dict[str, Any]:
         medication_type = dosage_form if dosage_form != "Medication" else "Medication"
         if entry and entry.dosage_form and dosage_form == "Medication":
             medication_type = title_case(entry.dosage_form)
-        medications.append(
-            _attach_alternatives(
-                build_medication_record(
-                    name=name,
-                    category=category,
-                    medication_type=medication_type,
-                    dosage=extract_dosage(segment, dosage_form),
-                    frequency=frequency,
-                    duration=duration,
-                    insight=build_insight(entry, frequency, duration, dosage_form),
-                    entry=entry,
-                    match=match,
-                )
-            )
-        )
+        medications.append(build_medication_record(
+            name=name,
+            category=category,
+            medication_type=medication_type,
+            dosage=extract_dosage(segment, dosage_form),
+            frequency=frequency,
+            duration=duration,
+            insight=build_insight(entry, frequency, duration, dosage_form),
+            entry=entry,
+            match=match,
+            include_optional=False,
+        ))
         if len(medications) >= 6:
             break
 
@@ -1109,7 +1239,7 @@ def _heuristic_result(
             error_code=error_code,
         )
     except Exception:
-        logger.exception("Heuristic extraction failed; returning an empty review payload.")
+        logger.warning("Heuristic extraction failed; error_code=HEURISTIC_FAILED")
         next_warnings = list(warnings) + ["Rule-based extraction failed; every field requires manual review."]
         return add_pipeline_metadata(
             empty_extraction_result(),
@@ -1146,7 +1276,7 @@ def structure_medications(raw_text: str) -> dict[str, Any]:
                     parsed, requested_provider=provider, used_provider="huggingface"
                 )
             except Exception:
-                logger.exception("HuggingFace inference failed; using the heuristic parser.")
+                logger.warning("HuggingFace inference failed; error_code=PROVIDER_FAILED")
         else:
             logger.warning("No HF token set, using heuristic fallback parser.")
         return _heuristic_result(
@@ -1165,7 +1295,7 @@ def structure_medications(raw_text: str) -> dict[str, Any]:
                 parsed, requested_provider=provider, used_provider="endpoint"
             )
         except Exception:
-            logger.exception("Endpoint inference failed; using the heuristic parser.")
+            logger.warning("Endpoint inference failed; error_code=PROVIDER_FAILED")
             return _heuristic_result(
                 raw_text,
                 requested_provider=provider,

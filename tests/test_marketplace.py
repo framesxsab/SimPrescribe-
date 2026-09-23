@@ -163,6 +163,72 @@ def test_patient_corrections_preserve_original_medication_version():
     assert stored["patient_review_versions"][0]["medications"][0]["name"] == "Paracetmol"
 
 
+def test_patient_confirmation_is_owner_scoped_and_cannot_repeat():
+    patient, other = account("patient"), account("patient")
+    analysis_id = str(uuid.uuid4())
+    original = {"name": "Paracetamol", "dosage": "500 mg", "frequency": "N/A", "duration": "3 days", "type": "Tablet"}
+    append_history({"id": analysis_id, "created_at": datetime.now(timezone.utc).isoformat(),
+                    "prescription_state": "review_required", "patient_review_status": "needs_review",
+                    "medications": [original], "original_medications": [original]}, owner_id=patient["id"])
+    other_client = login_client(other)
+    other_token = other_client.get("/").text.split('name="csrf" value="', 1)[1].split('"', 1)[0]
+    payload = {"status": "corrected", "medications": [{**original, "frequency": "once daily"}]}
+    assert other_client.patch(f"/api/analyses/{analysis_id}/patient-review", headers={"X-CSRF-Token": other_token}, json=payload).status_code == 404
+    assert other_client.get(f"/api/analyses/{analysis_id}/status").status_code == 404
+    assert other_client.post(f"/api/analyses/{analysis_id}/process", headers={"X-CSRF-Token": other_token}).status_code == 404
+
+    client = login_client(patient)
+    page = client.get(f"/details/{analysis_id}")
+    assert "Prescription review" in page.text
+    token = page.text.split("'X-CSRF-Token':'", 1)[1].split("'", 1)[0]
+    first = client.patch(f"/api/analyses/{analysis_id}/patient-review", headers={"X-CSRF-Token": token}, json=payload)
+    assert first.status_code == 200
+    assert client.patch(f"/api/analyses/{analysis_id}/patient-review", headers={"X-CSRF-Token": token}, json=payload).status_code == 409
+    saved = get_analysis_record(analysis_id, patient["id"])
+    assert saved["prescription_state"] == "confirmed"
+    assert saved["original_medications"][0]["frequency"] == "N/A"
+    assert saved["medications"][0]["frequency"] == "once daily"
+    assert len(saved["patient_review_versions"]) == 1
+    assert client.get(f"/details/{analysis_id}").status_code == 200
+
+
+def test_patient_draft_survives_refresh_without_changing_original():
+    patient = account("patient")
+    analysis_id = str(uuid.uuid4())
+    original = {"name": "Paracetamol", "dosage": "500 mg", "frequency": "N/A", "duration": "N/A", "type": "Tablet"}
+    append_history({"id": analysis_id, "created_at": datetime.now(timezone.utc).isoformat(),
+                    "prescription_state": "review_required", "patient_review_status": "needs_review",
+                    "medications": [original], "original_medications": [original]}, owner_id=patient["id"])
+    client = login_client(patient)
+    page = client.get(f"/details/{analysis_id}")
+    token = page.text.split("'X-CSRF-Token':'", 1)[1].split("'", 1)[0]
+    changed = {**original, "frequency": "once daily"}
+    response = client.patch(f"/api/analyses/{analysis_id}/patient-draft", headers={"X-CSRF-Token": token}, json={"medications": [changed]})
+    assert response.status_code == 200
+    assert 'value="once daily"' in client.get(f"/details/{analysis_id}").text
+    stored = get_analysis_record(analysis_id, patient["id"])
+    assert stored["original_medications"][0]["frequency"] == "N/A"
+    assert stored["medications"][0]["frequency"] == "N/A"
+    assert stored["patient_draft_medications"][0]["frequency"] == "once daily"
+    assert len(stored["patient_draft_versions"]) == 1
+
+
+def test_stale_processing_refresh_becomes_recoverable_without_new_analysis():
+    patient = account("patient")
+    analysis_id = str(uuid.uuid4())
+    append_history({"id": analysis_id, "created_at": datetime.now(timezone.utc).isoformat(),
+                    "processing_started_at": (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat(),
+                    "prescription_state": "processing", "processing_stage": "ocr", "medications": []}, owner_id=patient["id"])
+    client = login_client(patient)
+    first = client.get(f"/details/{analysis_id}")
+    second = client.get(f"/details/{analysis_id}")
+    assert first.status_code == second.status_code == 200
+    assert "Try reading again" in second.text
+    stored = get_analysis_record(analysis_id, patient["id"])
+    assert stored["prescription_state"] == "processing_failed"
+    assert stored["error_code"] == "PROCESSING_INTERRUPTED"
+
+
 def test_protected_source_is_owner_scoped():
     patient, other = account("patient"), account("patient")
     analysis_id = str(uuid.uuid4())

@@ -37,20 +37,20 @@
         const lookup = med && med.alternatives_lookup;
         if (lookup && typeof lookup === "object") {
             if (lookup.local_count || lookup.skipped_reason === "local_candidates_present") {
-                return "If this medicine is unavailable (local dataset)";
+                return "Possible options to discuss with a pharmacist";
             }
-            if (lookup.web_count) return "If this medicine is unavailable (web/model)";
-            if (lookup.skipped_reason === "lookup_disabled") return "Local list empty. Web/model lookup is off.";
-            if (lookup.skipped_reason === "no_validated_candidates") return "No validated web/model candidates";
+            if (lookup.web_count) return "Other options to discuss with a pharmacist";
+            if (lookup.skipped_reason === "lookup_disabled") return "No additional options are listed";
+            if (lookup.skipped_reason === "no_validated_candidates") return "No additional options could be verified";
         }
         const status = med && med.alternatives_status;
-        if (status === "local_dataset") return "If this medicine is unavailable (local dataset)";
-        if (status === "web_model") return "If this medicine is unavailable (web/model)";
-        if (status === "web_empty") return "No validated web/model candidates";
+        if (status === "local_dataset") return "Possible options to discuss with a pharmacist";
+        if (status === "web_model") return "Other options to discuss with a pharmacist";
+        if (status === "web_empty") return "No additional options could be verified";
         if (status === "web_disabled" || webLookupEnabled === false) {
-            return "Local list empty. Web/model lookup is off.";
+            return "No additional options are listed";
         }
-        return "No dataset reference candidates";
+        return "No additional options are listed";
     }
 
   function alternativeNames(med) {
@@ -62,11 +62,9 @@
   function pipelineSummary(pipeline) {
     if (!pipeline || typeof pipeline !== "object") return "";
     const parts = [];
-    if (pipeline.requested_provider && pipeline.used_provider && pipeline.requested_provider !== pipeline.used_provider) {
-      parts.push("Fallback " + pipeline.requested_provider + " → " + pipeline.used_provider);
-    } else if (pipeline.used_provider) parts.push("Provider: " + pipeline.used_provider);
-    if (pipeline.degraded) parts.push("Degraded analysis");
-    if (pipeline.error_code) parts.push("Code " + pipeline.error_code);
+    if (pipeline.used_provider) parts.push("Review the result against the original prescription");
+    if (pipeline.degraded) parts.push("Some details may need extra checking");
+    if (pipeline.ocr_confidence != null && Number(pipeline.ocr_confidence) < 0.8) parts.push("The scan was difficult to read");
     const warnings = [...safeList(pipeline.warnings), ...safeList(pipeline.ocr_warnings)];
     if (warnings.length) parts.push(warnings.join(" "));
     return parts.join(". ");

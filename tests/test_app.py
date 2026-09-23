@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from simpliscribe.main import app
+from simpliscribe.main import app, format_patient_datetime
 from simpliscribe.inference import fallback_extract
 from simpliscribe.inference import build_medication_record
 from simpliscribe.inference import call_huggingface
@@ -93,6 +93,12 @@ def test_dashboard_route():
     assert client.get("/static/workspace.css").status_code == 200
 
 
+def test_patient_datetime_filter_is_human_readable():
+    formatted = format_patient_datetime("2026-09-22T15:28:43.645734+00:00")
+    assert formatted.startswith("22 Sep 2026, ")
+    assert "T15:28:43" not in formatted
+
+
 def test_history_api_route():
     response = client.get("/api/history")
     assert response.status_code == 200
@@ -144,7 +150,10 @@ def test_audit_api_returns_only_local_owner_events():
 def test_health_route_exposes_review_boundary():
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json()["clinical_use"] == "human_review_required"
+    payload = response.json()
+    assert payload["clinical_use"] == "human_review_required"
+    assert payload["ocr_state"] in {"not_started", "initializing", "ready", "failed"}
+    assert isinstance(payload["ocr_ready"], bool)
 
 
 def test_authentication_redirects_and_creates_secure_session():
@@ -567,6 +576,31 @@ def test_analyze_requires_explicit_consent():
     response = client.post("/api/analyze", data={"csrf": csrf_for(client)}, files={"file": ("rx.png", b"not an image", "image/png")})
     assert response.status_code == 400
     assert response.json()["detail"] == "Explicit processing consent is required."
+
+
+def test_analyze_rejects_corrupt_pdf_and_unsupported_extension():
+    from simpliscribe import main as main_module
+
+    main_module._request_times.clear()
+    token = csrf_for(client)
+    try:
+        corrupt_pdf = client.post(
+            "/api/analyze",
+            data={"consent": "true", "csrf": token},
+            files={"file": ("rx.pdf", b"not a pdf", "application/pdf")},
+        )
+        assert corrupt_pdf.status_code == 400
+        assert corrupt_pdf.json()["detail"] == "The uploaded file is not a valid PDF."
+
+        unsupported = client.post(
+            "/api/analyze",
+            data={"consent": "true", "csrf": token},
+            files={"file": ("rx.txt", b"Paracetamol 650 mg", "text/plain")},
+        )
+        assert unsupported.status_code == 400
+        assert unsupported.json()["detail"] == "Unsupported file type."
+    finally:
+        main_module._request_times.clear()
 
 
 def test_storage_isolates_analysis_owners():

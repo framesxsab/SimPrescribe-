@@ -1,4 +1,7 @@
 import os
+import logging
+import time
+from contextvars import ContextVar
 from math import ceil
 from pathlib import Path
 from threading import Lock
@@ -16,6 +19,10 @@ from .config import settings
 _ocr_reader: Any | None = None
 _ocr_reader_lock = Lock()
 _ocr_inference_lock = Lock()
+_ocr_state = "not_started"
+_ocr_error_code: str | None = None
+ocr_analysis_id: ContextVar[str] = ContextVar("ocr_analysis_id", default="")
+logger = logging.getLogger(__name__)
 PDF_RENDER_SCALE = 2
 
 
@@ -90,6 +97,7 @@ def _paddle_runtime_environment():
     paddle_home.mkdir(parents=True, exist_ok=True)
     paddlex_cache = Path(getattr(settings, "paddlex_cache_home", cache_dir / "paddlex"))
     paddlex_cache.mkdir(parents=True, exist_ok=True)
+    logger.info("ocr_cache_configured=true ocr_cache_writable=true")
 
     previous = {
         "USERPROFILE": os.environ.get("USERPROFILE"),
@@ -114,7 +122,7 @@ def _paddle_runtime_environment():
 
 
 def get_ocr_reader() -> Any:
-    global _ocr_reader
+    global _ocr_reader, _ocr_state, _ocr_error_code
     if _ocr_reader is not None:
         return _ocr_reader
 
@@ -123,58 +131,96 @@ def get_ocr_reader() -> Any:
         if _ocr_reader is not None:
             return _ocr_reader
 
+        _ocr_state = "initializing"
+        _ocr_error_code = None
+        logger.info("ocr_state=initializing")
+        started = time.monotonic()
+        import_started = time.monotonic()
+
         try:
-            from paddleocr import PaddleOCR
-        except ImportError as exc:
-            raise RuntimeError(
-                "PaddleOCR is not installed. Install `paddlepaddle` and `paddleocr` before running OCR."
-            ) from exc
-
-        reader = None
-        init_errors: list[Exception] = []
-
-        with _paddle_runtime_environment():
-            # PaddleOCR v3 dropped use_gpu/use_angle_cls in favor of device/use_textline_orientation.
-            for kwargs in (
-                {
-                    "lang": settings.ocr_language,
-                    "device": "gpu" if settings.ocr_use_gpu else "cpu",
-                    "enable_mkldnn": False,
-                    "use_textline_orientation": True,
-                    "show_log": False,
-                },
-                {
-                    "lang": settings.ocr_language,
-                    "device": "gpu" if settings.ocr_use_gpu else "cpu",
-                    "enable_mkldnn": False,
-                    "use_textline_orientation": True,
-                },
-                {
-                    "lang": settings.ocr_language,
-                    "enable_mkldnn": False,
-                    "use_angle_cls": True,
-                    "use_gpu": settings.ocr_use_gpu,
-                    "show_log": False,
-                },
-                {
-                    "lang": settings.ocr_language,
-                    "enable_mkldnn": False,
-                    "use_angle_cls": True,
-                    "use_gpu": settings.ocr_use_gpu,
-                },
-            ):
+            with _paddle_runtime_environment():
                 try:
-                    reader = PaddleOCR(**kwargs)
-                    break
-                except (TypeError, ValueError) as exc:
-                    init_errors.append(exc)
+                    from paddleocr import PaddleOCR
+                except ImportError as exc:
+                    raise RuntimeError(
+                        "PaddleOCR is not installed. Install `paddlepaddle` and `paddleocr` before running OCR."
+                    ) from exc
+                if analysis_id := ocr_analysis_id.get():
+                    logger.info("analysis_id=%s stage=ocr_import duration_ms=%d provider=paddle status=ok", analysis_id, round((time.monotonic() - import_started) * 1000))
 
-        if reader is None:
-            last_error = init_errors[-1] if init_errors else RuntimeError("Unknown PaddleOCR initialization failure.")
-            raise RuntimeError(f"Failed to initialize PaddleOCR: {last_error}") from last_error
+            reader = None
+            init_errors: list[Exception] = []
+            construction_started = time.monotonic()
 
-        _ocr_reader = reader
-        return _ocr_reader
+            with _paddle_runtime_environment():
+                # PaddleOCR v3 dropped use_gpu/use_angle_cls in favor of device/use_textline_orientation.
+                for kwargs in (
+                    {
+                        "lang": settings.ocr_language,
+                        "device": "gpu" if settings.ocr_use_gpu else "cpu",
+                        "enable_mkldnn": False,
+                        "use_textline_orientation": True,
+                        "show_log": False,
+                    },
+                    {
+                        "lang": settings.ocr_language,
+                        "device": "gpu" if settings.ocr_use_gpu else "cpu",
+                        "enable_mkldnn": False,
+                        "use_textline_orientation": True,
+                    },
+                    {
+                        "lang": settings.ocr_language,
+                        "enable_mkldnn": False,
+                        "use_angle_cls": True,
+                        "use_gpu": settings.ocr_use_gpu,
+                        "show_log": False,
+                    },
+                    {
+                        "lang": settings.ocr_language,
+                        "enable_mkldnn": False,
+                        "use_angle_cls": True,
+                        "use_gpu": settings.ocr_use_gpu,
+                    },
+                ):
+                    try:
+                        reader = PaddleOCR(**kwargs)
+                        break
+                    except (TypeError, ValueError) as exc:
+                        init_errors.append(exc)
+
+            if reader is None:
+                last_error = init_errors[-1] if init_errors else RuntimeError("Unknown PaddleOCR initialization failure.")
+                raise RuntimeError(f"Failed to initialize PaddleOCR: {last_error}") from last_error
+
+            _ocr_reader = reader
+            _ocr_state = "ready"
+            if analysis_id := ocr_analysis_id.get():
+                logger.info("analysis_id=%s stage=ocr_reader_construction duration_ms=%d provider=paddle status=ok", analysis_id, round((time.monotonic() - construction_started) * 1000))
+                logger.info("analysis_id=%s stage=ocr_initialization duration_ms=%d provider=paddle status=ok", analysis_id, round((time.monotonic() - started) * 1000))
+            return _ocr_reader
+        except Exception:
+            _ocr_state = "failed"
+            _ocr_error_code = "OCR_INIT_FAILED"
+            logger.warning("stage=ocr_initialization status=error error_code=OCR_INIT_FAILED")
+            raise
+
+
+def get_ocr_state() -> dict[str, Any]:
+    with _ocr_reader_lock:
+        ready = _ocr_state == "ready" and _ocr_reader is not None
+        state = _ocr_state if _ocr_reader is not None or _ocr_state != "ready" else "not_started"
+        return {"state": state, "ready": ready, "error_code": _ocr_error_code if state != "not_started" else None}
+
+
+def warm_ocr_reader() -> bool:
+    started = time.monotonic()
+    try:
+        get_ocr_reader()
+        logger.info("stage=ocr_warmup duration_ms=%d status=ready", round((time.monotonic() - started) * 1000))
+        return True
+    except Exception:
+        logger.warning("stage=ocr_warmup duration_ms=%d status=error error_code=OCR_INIT_FAILED", round((time.monotonic() - started) * 1000))
+        return False
 
 
 def _validate_pdf_document(document: fitz.Document) -> None:
@@ -242,14 +288,24 @@ def extract_ocr_result(file_path: Path) -> OCRResult:
     try:
         input_paths = [file_path]
         if file_path.suffix.lower() == ".pdf":
+            started = time.monotonic()
             input_paths = extract_pdf_pages(file_path)
+            if analysis_id := ocr_analysis_id.get():
+                logger.info("analysis_id=%s stage=pdf_conversion duration_ms=%d provider=fitz status=ok", analysis_id, round((time.monotonic() - started) * 1000))
             temp_images = input_paths
 
         lines: list[OCRLine] = []
         engine_failed = False
+        started = time.monotonic()
+        inference_duration = 0.0
+        lock_wait_duration = 0.0
+        postprocessing_started = time.monotonic()
         for path in input_paths:
             results = None
+            lock_wait_started = time.monotonic()
             with _ocr_inference_lock:
+                lock_wait_duration += time.monotonic() - lock_wait_started
+                inference_started = time.monotonic()
                 try:
                     try:
                         results = reader.ocr(str(path), cls=True)
@@ -258,8 +314,17 @@ def extract_ocr_result(file_path: Path) -> OCRResult:
                 except Exception:
                     engine_failed = True
                     break
+                finally:
+                    inference_duration += time.monotonic() - inference_started
             if results is not None:
+                postprocessing_started = time.monotonic()
                 lines.extend(_collect_paddle_lines(results))
+
+        if analysis_id := ocr_analysis_id.get():
+            logger.info("analysis_id=%s stage=ocr_lock_wait duration_ms=%d provider=local status=ok", analysis_id, round(lock_wait_duration * 1000))
+            logger.info("analysis_id=%s stage=ocr_inference duration_ms=%d provider=paddle status=%s", analysis_id, round(inference_duration * 1000), "error" if engine_failed else "ok")
+            logger.info("analysis_id=%s stage=ocr_postprocessing duration_ms=%d provider=local status=%s", analysis_id, round((time.monotonic() - postprocessing_started) * 1000), "error" if engine_failed else "ok")
+            logger.info("analysis_id=%s stage=ocr_execution duration_ms=%d provider=paddle status=%s", analysis_id, round((time.monotonic() - started) * 1000), "error" if engine_failed else "ok")
 
         text = "\n".join(line.text for line in lines)
         scores = [line.confidence for line in lines if line.confidence is not None]

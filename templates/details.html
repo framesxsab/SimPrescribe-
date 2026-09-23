@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="/static/workspace.css"/>
     <style>
         body { font-family: 'Inter', sans-serif; }
-        :root { --primary: #0d9488; }
+        :root { --primary: #0f766e; }
         .text-primary { color: var(--primary); }
         .bg-primary { background-color: var(--primary); }
         .border-primary { border-color: var(--primary); }
@@ -28,33 +28,24 @@
     {% set current = 'details' %}
     {% include "partials/nav.html" %}
     <main id="main-content" class="max-w-7xl mx-auto px-6 py-10">
+      {% set pipeline = analysis.pipeline or {} %}
       <div class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
-        <strong>Human review required.</strong> Compare this extraction with the original prescription. Reference candidates are not recommendations and must not be substituted without a prescriber or pharmacist.
-        {% if user and user.role == 'patient' and analysis.patient_review_status in ['confirmed','corrected'] %}<span class="ml-1 font-bold text-teal-800">Patient confirmation recorded; pharmacist verification is still required.</span>{% endif %}
-            {% set pipeline = analysis.pipeline or {} %}
-            {% if pipeline.used_provider or pipeline.degraded or pipeline.error_code or pipeline.cached_vector_match %}
-            <p class="mt-2 text-xs text-amber-800 flex flex-wrap items-center gap-2">
-                {% if pipeline.cached_vector_match %}
-                <span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800"><span class="material-symbols-outlined text-[14px]">bolt</span> Retrieved from Vector Cache (similarity: {{ (pipeline.cached_vector_similarity * 100)|round(0) if pipeline.cached_vector_similarity else 100 }}%)</span>
-                {% endif %}
-                <span>Requested provider: {{ pipeline.requested_provider or 'not reported' }}.</span>
-                <span>Used provider: {{ pipeline.used_provider or 'not reported' }}.</span>
-                {% if pipeline.ocr_confidence is not none %}<span>OCR confidence: {{ (pipeline.ocr_confidence * 100)|round(0) }}%.</span>{% endif %}
-                {% if pipeline.degraded %}<span>Degraded labeled output.</span>{% endif %}
-                {% if pipeline.error_code %}<span>Error code: {{ pipeline.error_code }}.</span>{% endif %}
-            </p>
-            {% endif %}
-            {% if pipeline.warnings %}
-            <p class="mt-1 text-xs text-amber-800">{{ pipeline.warnings|join(' ') }}</p>
-            {% endif %}
-        </div>
+        {% if user and user.role == 'patient' and analysis.patient_review_status in ['confirmed','corrected'] %}
+        <strong>Confirmation saved.</strong> Keep the original prescription nearby. A pharmacist must verify it before fulfilling an order.
+        {% else %}
+        <strong>Please check this list.</strong> Compare every medicine and instruction with the original prescription before you rely on it. A pharmacist will verify it before an order.
+        {% endif %}
+        {% if user and user.role in ['admin', 'reviewer', 'auditor'] and (pipeline.degraded or pipeline.error_code or pipeline.warnings) %}
+        <p class="mt-2 text-xs text-amber-800">Staff note: this result may need additional review.</p>
+        {% endif %}
+      </div>
 
         <!-- Page Header -->
         <div class="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.14em] text-primary mb-1">Prescription Analysis</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.14em] text-primary mb-1">Prescription details</p>
                 <h1 class="text-3xl font-extrabold tracking-tight text-slate-900">{{ analysis.filename }}</h1>
-                <p class="mt-2 text-sm text-slate-500">Analysed on {{ analysis.created_at }}</p>
+                <p class="mt-2 text-sm text-slate-500">Saved on {{ analysis.created_at|patient_datetime }}</p>
             </div>
             <div class="no-print flex flex-wrap gap-2">
             <button type="button" onclick="window.print()" class="print-btn inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition-colors">
@@ -75,7 +66,7 @@
                     <span class="material-symbols-outlined">person</span>
                 </div>
                 <div class="min-w-0">
-                    <p class="text-[10px] uppercase tracking-wider font-bold text-slate-400">Patient Name</p>
+                    <p class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Patient Name</p>
                     <p class="font-semibold text-slate-900 truncate">{{ analysis.patient_name or 'N/A' }}</p>
                 </div>
             </div>
@@ -84,7 +75,7 @@
                     <span class="material-symbols-outlined">medical_services</span>
                 </div>
                 <div class="min-w-0">
-                    <p class="text-[10px] uppercase tracking-wider font-bold text-slate-400">Prescribing Doctor</p>
+                    <p class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Prescribing Doctor</p>
                     <p class="font-semibold text-slate-900 truncate">{{ analysis.doctor_name or 'N/A' }}</p>
                 </div>
             </div>
@@ -93,7 +84,7 @@
                     <span class="material-symbols-outlined">calendar_today</span>
                 </div>
                 <div class="min-w-0">
-                    <p class="text-[10px] uppercase tracking-wider font-bold text-slate-400">Prescription Date</p>
+                    <p class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Prescription Date</p>
                     <p class="font-semibold text-slate-900">{{ analysis.date or 'N/A' }}</p>
                 </div>
             </div>
@@ -113,28 +104,29 @@
             <div>
                 <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/80">
-                        <h2 class="font-bold text-slate-900">Medication Summary</h2>
-                        <p class="text-xs text-slate-500 mt-0.5">All medicines extracted from this prescription</p>
+                            <h2 class="font-bold text-slate-900">Medicine list</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Compare these names and instructions with the original prescription.</p>
                     </div>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
+                        <table class="responsive-medicine-table min-w-[760px] w-full text-left border-collapse">
+                            <caption class="sr-only">Medicine list with strength, schedule, duration, and notes</caption>
                             <thead>
                                 <tr class="border-b border-slate-100">
-                                    <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">Medicine</th>
-                                    <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">Composition</th>
-                                    <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">Dosage</th>
-                                    <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">Frequency</th>
-                                    <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">Duration</th>
-                                    <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Note</th>
+                                    <th scope="col" class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">Medicine</th>
+                                    <th scope="col" class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">What it contains</th>
+                                    <th scope="col" class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">Strength</th>
+                                    <th scope="col" class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">How often</th>
+                                    <th scope="col" class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">How long</th>
+                                    <th scope="col" class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Note</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100">
                                 {% if analysis.medications %}
                                 {% for med in analysis.medications %}
                                 <tr class="hover:bg-slate-50/60 transition-colors">
-                                    <td class="px-6 py-4 align-top">
+                                    <td data-label="Medicine" class="px-6 py-4 align-top">
                                         <div class="font-bold text-slate-900 text-sm">{{ med.name }}</div>
-                                        <div class="text-[10px] uppercase tracking-wide font-semibold text-slate-400 mt-0.5">{{ med.type }}</div>
+                                        <div class="text-[10px] uppercase tracking-wide font-semibold text-slate-500 mt-0.5">{{ med.type }}</div>
                                         {% if med.requires_review %}
                                         <div class="mt-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">Needs review</div>
                                         {% endif %}
@@ -142,22 +134,22 @@
                                         <div class="text-[10px] text-slate-500 mt-0.5">{{ med.category }}</div>
                                         {% endif %}
                                     </td>
-                                    <td class="px-6 py-4 align-top text-sm text-slate-600 max-w-[180px]">
+                                    <td data-label="What it contains" class="px-6 py-4 align-top text-sm text-slate-600 max-w-[180px]">
                                         {{ med.composition or '—' }}
                                     </td>
-                                    <td class="px-6 py-4 align-top whitespace-nowrap">
+                                    <td data-label="Strength" class="px-6 py-4 align-top whitespace-nowrap">
                                         <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold">
                                             {{ med.dosage or 'N/A' }}
                                         </span>
                                     </td>
-                                    <td class="px-6 py-4 align-top text-sm font-medium text-slate-800">{{ med.frequency or 'N/A' }}</td>
-                                    <td class="px-6 py-4 align-top text-sm font-medium text-slate-800 whitespace-nowrap">{{ med.duration or 'N/A' }}</td>
+                                    <td data-label="How often" class="px-6 py-4 align-top text-sm font-medium text-slate-800">{{ med.frequency or 'N/A' }}</td>
+                                    <td data-label="How long" class="px-6 py-4 align-top text-sm font-medium text-slate-800 whitespace-nowrap">{{ med.duration or 'N/A' }}</td>
                                     <td class="px-6 py-4 align-top text-xs text-slate-500 leading-relaxed max-w-[220px]">{{ med.insight or '—' }}</td>
                                 </tr>
                                 {% endfor %}
                                 {% else %}
                                 <tr>
-                                    <td colspan="6" class="px-6 py-10 text-center text-sm text-slate-500">No medications stored for this analysis. Review the original prescription and OCR text.</td>
+                                    <td data-label="" colspan="6" class="px-6 py-10 text-center text-sm text-slate-500">No medications stored for this analysis. Review the original prescription and try again.</td>
                                 </tr>
                                 {% endif %}
                             </tbody>
@@ -168,7 +160,6 @@
                 <!-- Per-medication detailed panels -->
                 {% if analysis.medications %}
                 <div class="mt-8 space-y-4">
-                    <h2 class="text-lg font-bold text-slate-900">Detailed Medicine Reference</h2>
                     {% for med in analysis.medications %}
                     {% if med.substitutes or med.uses or med.side_effects or med.chemical_class or med.therapeutic_class or med.web_alternatives or med.alternatives_lookup %}
                     <details class="group bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -182,12 +173,12 @@
                                     <p class="text-xs text-slate-500">{{ med.therapeutic_class or med.category or 'General' }}</p>
                                 </div>
                             </div>
-                            <span class="material-symbols-outlined text-slate-400 group-open:rotate-180 transition-transform">expand_more</span>
+                            <span class="material-symbols-outlined text-slate-500 group-open:rotate-180 transition-transform">expand_more</span>
                         </summary>
                         <div class="border-t border-slate-100 px-6 py-5 grid gap-4 md:grid-cols-2">
                             {% if med.chemical_class or med.action_class %}
                             <div class="rounded-xl bg-slate-50 border border-slate-100 p-4">
-                                <p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">Reference Classes</p>
+                                <p class="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-2">Reference Classes</p>
                                 {% if med.chemical_class %}<p class="text-sm text-slate-700"><span class="font-semibold text-slate-900">Chemical:</span> {{ med.chemical_class }}</p>{% endif %}
                                 {% if med.action_class %}<p class="text-sm text-slate-700 mt-1"><span class="font-semibold text-slate-900">Action:</span> {{ med.action_class }}</p>{% endif %}
                                 {% if med.therapeutic_class %}<p class="text-sm text-slate-700 mt-1"><span class="font-semibold text-slate-900">Therapeutic:</span> {{ med.therapeutic_class }}</p>{% endif %}
@@ -195,8 +186,8 @@
                             {% endif %}
                             {% if med.substitutes %}
                             <div class="rounded-xl bg-slate-50 border border-slate-100 p-4">
-                                <p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">If this medicine is unavailable (local dataset) ({{ med.substitutes|length }})</p>
-                                <p class="text-xs text-slate-500 mb-2">Same-composition or listed brands from the bundled datasets. Not a recommendation to switch.</p>
+                                <p class="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-2">Possible options to discuss ({{ med.substitutes|length }})</p>
+                                <p class="text-xs text-slate-500 mb-2">Information only. Ask a prescriber or pharmacist before changing a medicine.</p>
                                 <div class="flex flex-wrap gap-1.5">
                                     {% for item in med.substitutes[:6] %}
                                     <span class="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">{{ item }}</span>
@@ -205,18 +196,18 @@
                             </div>
                             {% elif med.alternatives_lookup and med.alternatives_lookup.skipped_reason == 'lookup_disabled' %}
                             <div class="rounded-xl bg-slate-50 border border-slate-100 p-4">
-                                <p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">If this medicine is unavailable</p>
-                                <p class="text-xs text-slate-600">Local dataset had no same-composition brands. Web/model lookup is off.</p>
+                                <p class="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-2">If this medicine is unavailable</p>
+                                <p class="text-xs text-slate-600">No additional options are listed. Ask a pharmacist for help.</p>
                             </div>
                             {% elif med.alternatives_lookup and med.alternatives_lookup.skipped_reason == 'no_validated_candidates' %}
                             <div class="rounded-xl bg-slate-50 border border-slate-100 p-4">
-                                <p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">If this medicine is unavailable</p>
-                                <p class="text-xs text-slate-600">Web/model lookup ran; no names passed local dataset validation.</p>
+                                <p class="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-2">If this medicine is unavailable</p>
+                                <p class="text-xs text-slate-600">No additional options could be verified.</p>
                             </div>
                             {% endif %}
                             {% if med.web_alternatives %}
                             <div class="rounded-xl bg-indigo-50 border border-indigo-100 p-4">
-                                <p class="text-[10px] uppercase font-bold text-indigo-600 tracking-wider mb-2">If this medicine is unavailable (web/model) ({{ med.web_alternatives|length }})</p>
+                                <p class="text-[10px] uppercase font-bold text-indigo-600 tracking-wider mb-2">Other options to discuss ({{ med.web_alternatives|length }})</p>
                                 <ul class="space-y-1.5">
                                     {% for item in med.web_alternatives %}
                                     <li class="text-sm text-slate-700">
@@ -232,7 +223,7 @@
                             {% endif %}
                             {% if med.uses %}
                             <div class="rounded-xl bg-slate-50 border border-slate-100 p-4">
-                                <p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">Common Uses</p>
+                                <p class="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-2">Common Uses</p>
                                 <div class="flex flex-wrap gap-1.5">
                                     {% for item in med.uses %}
                                     <span class="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">{{ item }}</span>
@@ -262,11 +253,15 @@
             <aside class="space-y-5 no-print">
                 {% if show_patient_marketplace %}
                 <section id="medicine-marketplace" class="rounded-2xl border border-teal-200 bg-teal-50 p-5 shadow-sm">
-                    <h2 class="text-sm font-bold text-slate-900">Confirm your prescription</h2>
-                    <p class="mt-2 text-xs leading-5 text-slate-600">Compare each field with the original. Your edits are recorded as patient-entered and must still be verified by a pharmacist.</p>
+                    <h2 class="text-sm font-bold text-slate-900">{{ 'Ready to find a pharmacy' if analysis.patient_review_status in ['confirmed','corrected'] else 'Confirm your medicine list' }}</h2>
+                    <p class="mt-2 text-xs leading-5 text-slate-600">{{ 'Your confirmation is saved. A pharmacist will verify the original prescription before fulfilling an order.' if analysis.patient_review_status in ['confirmed','corrected'] else 'Compare each field with the original. Your changes are saved as your review and must still be checked by a pharmacist.' }}</p>
+                    {% if analysis.patient_review_status not in ['confirmed','corrected'] %}
                     <div id="patient-review-medications" class="mt-4 space-y-4">{% for med in analysis.medications %}<fieldset class="rounded-xl border border-teal-200 bg-white p-3" data-index="{{ loop.index0 }}"><legend class="px-1 text-xs font-bold text-teal-800">Medicine {{ loop.index }}</legend>{% for field in ['name','type','dosage','frequency','duration'] %}<label class="mt-2 block text-[10px] font-bold uppercase text-slate-500">{{ field }}<input data-field="{{ field }}" value="{{ med[field] or '' }}" class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs normal-case"></label>{% endfor %}<label class="mt-3 block text-xs"><input type="checkbox" data-generic-inquiry> Ask the pharmacist about generic information</label></fieldset>{% endfor %}</div>
                     <div class="mt-4 grid grid-cols-2 gap-2"><button type="button" data-patient-status="confirmed" class="rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white">Confirm unchanged</button><button type="button" data-patient-status="corrected" class="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white">Save edits and confirm</button></div>
-                    <button id="find-pharmacies" type="button" class="mt-3 w-full rounded-lg border border-teal-700 px-3 py-2 text-xs font-bold text-teal-800 {% if analysis.patient_review_status not in ['confirmed','corrected'] %}hidden{% endif %}">Find pharmacies serving my PIN</button>
+                    {% else %}
+                    <div id="patient-review-medications" class="mt-4 space-y-2">{% for med in analysis.medications %}<label class="block rounded-lg bg-white p-3 text-xs" data-index="{{ loop.index0 }}"><span class="font-semibold">{{ med.name }}</span><span class="mt-1 block"><input type="checkbox" data-generic-inquiry> Ask pharmacist about generic information</span></label>{% endfor %}</div>
+                    {% endif %}
+                    <button id="find-pharmacies" type="button" class="mt-3 w-full rounded-lg border border-teal-700 px-3 py-2 text-xs font-bold text-teal-800 {% if analysis.patient_review_status not in ['confirmed','corrected'] %}hidden{% endif %}">Find pharmacies near me</button>
                     {% if not user %}
                     <p class="mt-3 text-xs text-slate-600">To place an order, <a href="/login" class="font-bold text-teal-700 hover:underline">sign in</a> or <a href="/register/patient" class="font-bold text-teal-700 hover:underline">register</a> as a patient.</p>
                     {% endif %}
@@ -299,11 +294,11 @@
                 {% elif user and user.role == 'auditor' %}
                 <section class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-xs leading-5 text-amber-900">Auditor access is read-only. A reviewer must record corrections and outcomes.</section>
                 {% endif %}
-                {% if analysis.raw_text %}
+                {% if user and user.role in ['admin', 'reviewer', 'auditor'] and analysis.raw_text %}
                 <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-                        <span class="material-symbols-outlined text-base text-slate-400">document_scanner</span>
-                        Raw OCR Text
+                        <span class="material-symbols-outlined text-base text-slate-500">document_scanner</span>
+                        Extracted text
                     </h2>
                     <p class="mt-4 whitespace-pre-wrap break-words text-xs leading-6 text-slate-600 font-mono bg-slate-50 rounded-xl p-4 max-h-96 overflow-y-auto">{{ analysis.raw_text }}</p>
                 </section>
@@ -314,6 +309,7 @@
                     <p class="text-sm text-slate-600 mt-2">{{ analysis.pack_size }} {% if analysis.manufacturer %}· {{ analysis.manufacturer }}{% endif %}</p>
                 </section>
                 {% endif %}
+                {% if user and user.role in ['admin', 'reviewer', 'auditor'] %}
                 <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <h2 class="text-sm font-bold text-slate-900 mb-3">Quick Stats</h2>
                     <div class="space-y-2 text-sm">
@@ -335,6 +331,7 @@
                         </div>
                     </div>
                 </section>
+                {% endif %}
             </aside>
         </section>
     </main>
@@ -346,7 +343,7 @@
         const medications = patientRows().map(row => Object.fromEntries([...row.querySelectorAll('[data-field]')].map(input => [input.dataset.field, input.value])));
         const response = await fetch('/api/analyses/{{ analysis.id }}/patient-review', {method:'PATCH', headers:{'Content-Type':'application/json','X-CSRF-Token':'{{ csrf_token }}'}, body:JSON.stringify({status:button.dataset.patientStatus, medications})});
         const payload = await response.json(); if (!response.ok) { patientMessage.textContent = payload.detail || 'Confirmation failed.'; return; }
-        patientMessage.textContent = 'Prescription confirmed. You can now find local pharmacies.'; document.getElementById('find-pharmacies').classList.remove('hidden');
+        patientMessage.textContent = 'Your medicine list is confirmed. You can now find nearby pharmacies.'; document.getElementById('find-pharmacies').classList.remove('hidden');
       }));
       document.getElementById('find-pharmacies')?.addEventListener('click', async () => {
         const response = await fetch('/api/analyses/{{ analysis.id }}/pharmacies'), payload = await response.json();
@@ -354,7 +351,7 @@
         const target = document.getElementById('pharmacy-results'); target.replaceChildren();
         payload.pharmacies.forEach(pharmacy => { const card=document.createElement('div'); card.className='rounded-xl border border-teal-200 bg-white p-3 text-xs';
           const title=document.createElement('p'); title.className='font-bold text-sm'; title.textContent=pharmacy.business_name; card.append(title);
-          const availability=document.createElement('p'); availability.className='mt-1 text-slate-600'; availability.textContent=`${pharmacy.available_count}/${pharmacy.availability.length} exact-name items currently listed · ${pharmacy.exact_pin?'Same PIN':'Serves your PIN'}`; card.append(availability);
+          const availability=document.createElement('p'); availability.className='mt-1 text-slate-600'; availability.textContent=`${pharmacy.available_count}/${pharmacy.availability.length} requested medicines currently listed · ${pharmacy.exact_pin?'Matches your PIN':'Serves your PIN area'}`; card.append(availability);
           const mode=document.createElement('select'); mode.className='mt-2 w-full rounded-lg border p-2'; if(pharmacy.supports_pickup)mode.add(new Option('Pickup','pickup')); if(pharmacy.supports_delivery)mode.add(new Option('Local delivery','delivery')); card.append(mode);
           const address=document.createElement('textarea'); address.className='mt-2 hidden w-full rounded-lg border p-2'; address.placeholder='Delivery address'; mode.addEventListener('change',()=>address.classList.toggle('hidden',mode.value!=='delivery')); card.append(address);
           const order=document.createElement('button'); order.className='mt-2 w-full rounded-lg bg-teal-700 px-3 py-2 font-bold text-white'; order.textContent='Request pharmacist quote'; order.addEventListener('click',async()=>{const generic_inquiries=patientRows().filter(r=>r.querySelector('[data-generic-inquiry]').checked).map(r=>Number(r.dataset.index)); const r=await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'{{ csrf_token }}'},body:JSON.stringify({analysis_id:'{{ analysis.id }}',pharmacy_id:pharmacy.id,fulfillment_mode:mode.value,delivery_address:address.value,generic_inquiries})}),p=await r.json(); if(!r.ok){patientMessage.textContent=p.detail||'Order request failed.';return}location.href=`/orders/${p.id}`}); card.append(order); target.append(card); });

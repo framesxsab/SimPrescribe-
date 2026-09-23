@@ -9,6 +9,10 @@ pinned: false
 
 SimpliScribe is a FastAPI application that simplifies prescription reading by extracting text from prescription images or PDFs and turning that OCR output into a structured medication summary.
 
+The patient upload now persists the private source before OCR, then opens a dedicated processing page that reads saved backend stages while OCR and structuring run. The analysis records `uploaded`, `processing`, `review_required`, `confirmed`, or `processing_failed`; OCR output is checkpointed before structuring. Patients can retry a failed stage from the saved prescription, save review edits before confirmation, and refresh the processing page without starting another analysis. Pharmacy matching requires confirmation. Required medicine aliases load from the fingerprinted SQLite index when it is current; build or refresh it with `python -m simpliscribe.build_lexicon_index`. A missing or stale index falls back to authoritative CSV construction, and an existing stale index is logged. The generated SQLite database is a rebuildable runtime artifact and is not committed. Optional substitutes, uses, side effects, and composition peer data load when reference details are requested. PDF reports are generated on demand; optional web/model alternative lookup does not delay review. The existing `/api/analyze` endpoint remains synchronous for API compatibility.
+
+The OCR reader warms once in the background after application startup in non-test processes. `/api/live` stays available during warmup; `/api/health` reports OCR readiness. Uploads that arrive during warmup remain attached to their saved processing record and wait for the same reader instance.
+
 It also provides an authenticated prescription-first marketplace MVP: patients can confirm the structured result, find approved local pharmacies serving their PIN code, request a pharmacist-verified quote, and track COD pickup or local-delivery fulfillment. Pharmacies manage exact-name inventory and order requests through a dedicated portal.
 
 ## Safety and intended use
@@ -77,7 +81,7 @@ The first local request can take a few minutes because model weights may need to
 
 When a listed medicine may be unavailable, SimpliScribe first looks in the **bundled trained datasets**: CSV substitute columns and other brands that share the same composition. That local lookup does not send data off the machine.
 
-If the local list is empty, an optional web/model phase can add more **reference candidates** from the configured model's knowledge and, failing that, a DuckDuckGo web search. This phase is **off by default** (fail-closed) because it sends data outside the box:
+If the local list is empty, the optional web/model lookup helper can add more **reference candidates** from a configured model or DuckDuckGo. The patient upload path does not invoke this helper during core structuring, even when enabled. It is **off by default** (fail-closed) because it sends data outside the box:
 
 ```env
 ALTERNATIVES_ENABLED=true
@@ -135,7 +139,7 @@ OCR_CACHE_DIR=./tmp/ocr-cache
 # PADDLE_PDX_CACHE_HOME=./tmp/ocr-cache/paddlex
 ```
 
-OCR cache directories are created and write-tested at startup. Paddle/PaddleX model binaries are runtime data and must stay outside the repository (the default `tmp/ocr-cache` is ignored). The application temporarily routes Paddle's legacy `~/.cache/paddle` expansion into this configured directory during reader initialization, then restores the process environment. Set `OCR_CACHE_DIR` (and optionally the two supported Paddle overrides) to a writable encrypted runtime volume in production.
+Relative OCR cache paths resolve from the repository root, independent of the shell or server working directory. Local CPU OCR still takes tens of seconds per image on measured runs; background warmup removes model initialization from a first upload when warmup completes in advance, but does not reduce inference time. OCR cache directories are created and write-tested at startup. Paddle/PaddleX model binaries are runtime data and must stay outside the repository (the default `tmp/ocr-cache` is ignored). PaddleOCR imports and initializes with its supported cache variables and legacy home expansion routed to the configured directory; the original process environment is restored afterward. Absolute `OCR_CACHE_DIR`, `PADDLE_HOME`, and `PADDLE_PDX_CACHE_HOME` overrides are preserved.
 
 If you do not want to run the local model server yet, keep `INFERENCE_PROVIDER=fallback` and the app will stay fully local with rule-based extraction only.
 
@@ -145,6 +149,22 @@ Open `http://127.0.0.1:8000`.
 
 ```bash
 pytest
+```
+
+The axe accessibility suite uses Playwright. With the app running and an existing local patient account, install its dev tools and browser once, set the account and any saved records to scan, then run it:
+
+```powershell
+npm ci
+npx playwright install chromium
+$env:SIMPLISCRIBE_BASE_URL = "http://127.0.0.1:8000"
+$env:A11Y_EMAIL = "local-patient@example.test"
+$env:A11Y_PASSWORD = "the-local-test-password"
+# Optional IDs for records owned by that patient:
+$env:A11Y_PROCESSING_ID = "..."
+$env:A11Y_REVIEW_ID = "..."
+$env:A11Y_DETAILS_ID = "..."
+$env:A11Y_ORDER_ID = "..."
+npm run test:a11y
 ```
 
 CI (`.github/workflows/quality.yml`) also checks that `uvicorn app:app` can import the ASGI app, applies Alembic migrations to a throwaway SQLite database, runs a ruff check baseline (no autoformat), publishes a pytest coverage report artifact, builds the Docker image without preloading OCR models, restores a disposable PostgreSQL database in CI, and runs the synthetic golden gate below.
@@ -262,7 +282,7 @@ Requirements reviewed from supplied course material were distilled without copyi
 2. **Final-report integrity:** each review preserves the prior medication and review state as a numbered version, rejects stale concurrent updates, emits an audit event, and exposes owner-scoped audit retrieval at `/api/audit`; use managed database migrations before independently evolving deployed versions.
 3. **Operational recovery:** the guarded [PostgreSQL recovery verifier](docs/PRODUCTION_RECOVERY.md) can verify a backup against a disposable private restore database; record the result in the approved operations system before retaining identifiable data.
 4. **Accessible report output:** PDF and on-screen reports are readable, printable, explicit about human verification, and show how many prior review states are preserved.
-5. **Unavailable-medicine reference list:** local CSV substitutes and same-composition brands are shown first; optional web/model candidates run only when that list is empty and `ALTERNATIVES_ENABLED=true`.
+5. **Unavailable-medicine reference list:** local CSV substitutes and same-composition brands are shown first. The optional web/model helper requires an explicit call outside the core upload path and `ALTERNATIVES_ENABLED=true`.
 6. **Degraded analysis output:** model, OCR-engine, lexicon, database, and PDF failures keep a labeled payload or a documented error code instead of a silent partial result.
 
 These are technical safeguards, not clinical validation. Patient and approved-pharmacy accounts support prescription fulfillment only; SimpliScribe does not add consultation/diagnosis records, automatic treatment decisions, medicine reminders, or drug-interaction decisioning.

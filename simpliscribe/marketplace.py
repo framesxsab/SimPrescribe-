@@ -130,7 +130,7 @@ def create_order(patient_id: str, analysis_id: str, pharmacy_id: str, fulfillmen
         if not pharmacy:
             raise LookupError("Approved pharmacy not found.")
         analysis = json.loads(analysis_payload)
-        if analysis.get("patient_review_status") not in {"confirmed", "corrected"}:
+        if analysis.get("patient_review_status") not in {"confirmed", "corrected"} or analysis.get("prescription_state", "confirmed") != "confirmed":
             raise ValueError("Confirm the prescription before requesting an order.")
         retained_source = connection.execute(select(prescription_files.c.id).where(
             prescription_files.c.analysis_id == analysis_id, prescription_files.c.expires_at >= now()

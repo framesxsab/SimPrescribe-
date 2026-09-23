@@ -3,11 +3,12 @@ from io import BytesIO
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from simpliscribe import inference
 from simpliscribe.config import settings
 from simpliscribe.inference import structure_medications
 from simpliscribe.main import app
 from simpliscribe.ocr import OCRLine, OCRResult
-from simpliscribe.storage import append_history, save_history
+from simpliscribe.storage import append_history, get_analysis_record, get_prescription_file, save_history
 from tests.test_app import csrf_for
 
 
@@ -123,6 +124,127 @@ def test_storage_failure_returns_complete_unsaved_payload(monkeypatch):
     assert payload["pipeline"]["error_code"] == "STORAGE_FAILED"
     assert payload["medications"] or payload["pipeline"]["human_review_required"] is True
     assert "analysis_id" in payload
+
+
+def test_structuring_failure_keeps_ocr_and_retries_without_reupload(monkeypatch):
+    async def run_inline(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("simpliscribe.web.asyncio.to_thread", run_inline)
+    monkeypatch.setattr("simpliscribe.web.extract_ocr_result", lambda _: OCRResult(
+        "Paracetamol 650 tab od 5 days", 0.9,
+        (OCRLine("Paracetamol 650 tab od 5 days", 0.9),), (),
+    ))
+    monkeypatch.setattr("simpliscribe.web.structure_medications", lambda _: (_ for _ in ()).throw(RuntimeError("parser down")))
+    response = client.post("/api/analyze", data={"consent": "true", "csrf": csrf_for(client)},
+                           files={"file": ("rx.png", _png_bytes(), "image/png")})
+    assert response.status_code == 503
+    analysis_id = response.json()["analysis_id"]
+    saved = get_analysis_record(analysis_id)
+    source = get_prescription_file(analysis_id)
+    try:
+        assert saved["prescription_state"] == "processing_failed"
+        assert saved["raw_text"] == "Paracetamol 650 tab od 5 days"
+        assert saved["ocr_lines"][0]["confidence"] == 0.9
+        assert source is not None
+        assert client.get(f"/api/report/{analysis_id}").json()["error_code"] == "REPORT_UNAVAILABLE"
+        assert client.get(f"/details/{analysis_id}").status_code == 200
+
+        monkeypatch.setattr("simpliscribe.web.structure_medications", lambda _: {
+            "patient_name": "N/A", "doctor_name": "N/A", "date": "N/A",
+            "medications": [{"name": "Paracetamol", "dosage": "650 mg", "type": "Tablet", "frequency": "once daily", "duration": "5 days"}],
+            "pipeline": {"used_provider": "fallback"},
+        })
+        retry = client.post(f"/api/analyses/{analysis_id}/retry", headers={"X-CSRF-Token": csrf_for(client)})
+        assert retry.status_code == 200
+        assert get_analysis_record(analysis_id)["prescription_state"] == "review_required"
+        assert get_analysis_record(analysis_id)["raw_text"] == saved["raw_text"]
+    finally:
+        if source:
+            (settings.prescription_storage_dir / source["storage_name"]).unlink(missing_ok=True)
+
+
+def test_upload_handoff_shows_saved_stage_and_processes_once(monkeypatch):
+    async def run_inline(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    analysis_id = ""
+    def fake_ocr(_path):
+        saved = get_analysis_record(analysis_id)
+        assert saved["prescription_state"] == "processing"
+        assert saved["processing_stage"] == "ocr_initializing"
+        return OCRResult("Paracetamol 650 tab od 5 days", 0.9,
+                         (OCRLine("Paracetamol 650 tab od 5 days", 0.9),), ())
+
+    monkeypatch.setattr("simpliscribe.web.asyncio.to_thread", run_inline)
+    monkeypatch.setattr("simpliscribe.web.get_ocr_state", lambda: {"state": "initializing", "ready": False, "error_code": None})
+    monkeypatch.setattr("simpliscribe.web.extract_ocr_result", fake_ocr)
+    monkeypatch.setattr("simpliscribe.web.structure_medications", lambda _: {
+        "patient_name": "N/A", "doctor_name": "N/A", "date": "N/A",
+        "medications": [{"name": "Paracetamol", "dosage": "650 mg", "type": "Tablet", "frequency": "once daily", "duration": "5 days"}],
+        "pipeline": {"used_provider": "fallback"},
+    })
+    token = csrf_for(client)
+    start = client.post("/api/analyses/start", data={"consent": "true", "csrf": token},
+                        files={"file": ("rx.png", _png_bytes(), "image/png")})
+    assert start.status_code == 201
+    analysis_id = start.json()["analysis_id"]
+    source = get_prescription_file(analysis_id)
+    try:
+        assert source is not None
+        assert client.get(f"/api/analyses/{analysis_id}/status").json()["prescription_state"] == "uploaded"
+        processing = client.get(f"/details/{analysis_id}")
+        assert processing.status_code == 200
+        assert "preparing a medicine list" in processing.text
+        result = client.post(f"/api/analyses/{analysis_id}/process", headers={"X-CSRF-Token": token})
+        assert result.status_code == 200
+        assert client.get(f"/api/analyses/{analysis_id}/status").json()["prescription_state"] == "review_required"
+        assert client.post(f"/api/analyses/{analysis_id}/process", headers={"X-CSRF-Token": token}).status_code == 409
+        assert client.get(f"/details/{analysis_id}").status_code == 200
+    finally:
+        if source:
+            (settings.prescription_storage_dir / source["storage_name"]).unlink(missing_ok=True)
+
+
+def test_fallback_core_does_not_run_composition_enrichment(monkeypatch):
+    monkeypatch.setattr("simpliscribe.inference._attach_alternatives", lambda _: (_ for _ in ()).throw(AssertionError("core fallback should not enrich alternatives")))
+    monkeypatch.setattr("simpliscribe.inference.load_optional_reference_fields", lambda: (_ for _ in ()).throw(AssertionError("core fallback should not load optional reference fields")))
+    result = structure_medications("Paracetamol 650 tab od 5 days")
+    assert result["medications"]
+
+
+def test_optional_reference_fields_hydrate_on_request(monkeypatch):
+    from simpliscribe.inference import MedicineEntry, hydrate_medicine_entry
+
+    entry = MedicineEntry(
+        name="Paracetamol", composition="", category="General", dosage_form="Tablet", manufacturer="", pack_size="",
+        therapeutic_class="", chemical_class="", action_class="", substitutes=(), uses=(), side_effects=(), sources=(),
+    )
+    monkeypatch.setattr("simpliscribe.inference.load_optional_reference_fields", lambda: {
+        "paracetamol": {"substitutes": ("Dolo 650",), "uses": ("Pain relief",), "side_effects": ("Nausea",)},
+    })
+    hydrated = hydrate_medicine_entry(entry)
+    assert hydrated.substitutes == ("Dolo 650",)
+    assert hydrated.uses == ("Pain relief",)
+    assert hydrated.side_effects == ("Nausea",)
+
+
+def test_lexicon_initialization_lock_allows_one_concurrent_build(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from functools import lru_cache
+
+    calls = {"count": 0}
+
+    @lru_cache(maxsize=1)
+    def fake_loader():
+        calls["count"] += 1
+        return {"paracetamol": object()}
+
+    monkeypatch.setattr("simpliscribe.inference._load_medicine_lexicon", fake_loader)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(lambda _: inference.load_medicine_lexicon(), range(4)))
+    assert calls["count"] == 1
+    assert all(result is results[0] for result in results)
 
 
 def test_pdf_builder_failure_returns_unavailable_code(monkeypatch):

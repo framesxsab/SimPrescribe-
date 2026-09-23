@@ -15,3 +15,7 @@ OCR, structured medication summaries, uncertainty labels, alternatives as refere
 ## Deferred
 
 Payments, refunds, logistics, maps, split fulfillment, external notifications, password reset/email verification, and any clinical decision functionality.
+
+## Prescription core stabilization checkpoint
+
+Persisted processing states, private source and OCR checkpoints, owner-scoped retry, patient review and saved edits, atomic confirmation, and the confirmation-gated pharmacy handoff are implemented. The patient upload hands off to a dedicated page that shows saved progress; refresh, retry, back/forward navigation, and confirmation were checked in the browser. The OCR cache is rooted to the project runtime directory, and the clean-browser OCR pass reached review. The development checkpoint passed automated tests, the synthetic golden gate, axe scans, keyboard checks, and mobile reflow checks. This does not establish clinical validation or production readiness; operational security and prospective clinical validation remain required before production use.

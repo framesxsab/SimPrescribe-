@@ -1,6 +1,7 @@
 body { font-family: Inter, sans-serif; }
 .text-primary { color: #0f766e; }
 .bg-primary { background-color: #0f766e; }
+.text-white { color: #fff; }
 .hover\:text-primary:hover { color: #0f766e; }
 .skip-link {
   position: absolute;
@@ -13,6 +14,67 @@ body { font-family: Inter, sans-serif; }
 }
 .skip-link:focus { left: 0.75rem; top: 0.75rem; }
 [aria-busy="true"] { cursor: progress; }
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid #0f766e;
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .responsive-medicine-table {
+    min-width: 0 !important;
+    display: block;
+  }
+  .responsive-medicine-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .responsive-medicine-table tbody,
+  .responsive-medicine-table tr {
+    display: block;
+  }
+  .responsive-medicine-table tr {
+    padding: 1rem;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .responsive-medicine-table td {
+    display: grid;
+    grid-template-columns: minmax(6rem, 35%) minmax(0, 1fr);
+    gap: 0.75rem;
+    width: 100%;
+    max-width: none !important;
+    padding: 0.35rem 0 !important;
+    white-space: normal !important;
+  }
+  .responsive-medicine-table td::before {
+    content: attr(data-label);
+    color: #64748b;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.25rem;
+    text-transform: uppercase;
+  }
+  .responsive-medicine-table td:first-child {
+    display: block;
+    padding-top: 0 !important;
+  }
+  .responsive-medicine-table td:first-child::before,
+  .responsive-medicine-table td[colspan]::before {
+    display: none;
+  }
+  .responsive-medicine-table td[colspan],
+  .responsive-medicine-table .med-alt-row td {
+    display: block;
+    text-align: left;
+  }
+}
 @media print {
   header, .no-print { display: none !important; }
   body { background: #fff; }
