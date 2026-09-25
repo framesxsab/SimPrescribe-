@@ -433,6 +433,7 @@ def seed_test_pharmacies() -> None:
     can be tested without manual registration or admin approval.
     """
     import uuid as _uuid
+    from .marketplace import normalize_medicine_name
     from .security import hash_password
 
     with engine.connect() as connection:
@@ -523,7 +524,7 @@ def seed_test_pharmacies() -> None:
                     approval_status="approved", approved_at=now,
                 ))
                 for med_name, unit, price, stock in config["inventory"]:
-                    normalized = med_name.strip().upper()
+                    normalized = normalize_medicine_name(med_name)
                     connection.execute(insert(inventory).values(
                         id=str(_uuid.uuid4()), pharmacy_id=pharmacy_id,
                         medicine_name=med_name, normalized_name=normalized,

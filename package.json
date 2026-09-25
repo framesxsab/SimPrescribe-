@@ -1,7 +1,8 @@
 {
   "private": true,
   "scripts": {
-    "test:a11y": "node tests/a11y_runner.mjs"
+    "test:a11y": "node tests/a11y_runner.mjs",
+    "test:marketplace": "node tests/marketplace_runner.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",

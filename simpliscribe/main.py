@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 import uuid
 from collections import defaultdict, deque
@@ -9,18 +10,21 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import IntegrityError, OperationalError
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
 from .metrics import generate_prometheus_metrics, get_metrics_snapshot, record_http_request
 from .retrieval import get_retriever, get_vector_cache
-from .marketplace import MarketplaceConflict, accept_order, cancel_order, create_order, deactivate_inventory_item, decline_order, list_orders_for, matching_pharmacies, order_detail, pharmacy_inventory, pharmacy_transition, quote_order, save_inventory_item, valid_pin
+from .marketplace import MarketplaceConflict, accept_order, cancel_order, confirmed_prescription, create_order, deactivate_inventory_item, decline_order, list_orders_for, matching_pharmacies, order_detail, pharmacy_inventory, pharmacy_transition, quote_order, save_inventory_item, valid_pin
 from .schemas import CacheStatsResponse, HealthResponse, InventoryRequest, LiveResponse, OrderRequest, PatientReviewRequest, QuoteRequest, SimilarPrescriptionsResponse, TransitionRequest
 from .security import authenticate, authenticate_oidc_callback, current_user, csrf_token, hash_password, oidc_authorization_url, owner_id, require_edit_role, require_role, verify_csrf
 from .storage import append_audit_event, create_user, ensure_schema, get_analysis_record, get_pharmacy_by_user, get_user, get_user_by_email, load_audit_events, load_history, list_pharmacies, ping_database, purge_expired_marketplace, seed_test_pharmacies, set_pharmacy_approval
 from .ocr import get_ocr_state, warm_ocr_reader
 from .web import analyze, download_report, export_audit_csv, history_payload, patient_review_analysis, prescription_source, render_dashboard, render_details, render_history, retry_processing, review_analysis, save_patient_draft, start_analysis
+
+logger = logging.getLogger(__name__)
 
 settings.validate_runtime()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -403,7 +407,19 @@ def _marketplace_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=403, detail=str(exc))
     if isinstance(exc, LookupError):
         return HTTPException(status_code=404, detail=str(exc))
-    return HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, (IntegrityError, OperationalError)):
+        logger.warning("Marketplace write contention; error_code=MARKETPLACE_CONFLICT")
+        return HTTPException(status_code=409, detail="The order changed. Reload and review its current status.")
+    if isinstance(exc, json.JSONDecodeError):
+        logger.error("Invalid persisted marketplace data; error_code=MARKETPLACE_DATA_INVALID")
+        return HTTPException(status_code=500, detail="The marketplace request could not be completed.")
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=400, detail=str(exc))
+    logger.error(
+        "Marketplace operation failed; error_code=MARKETPLACE_INTERNAL_ERROR",
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    return HTTPException(status_code=500, detail="The marketplace request could not be completed.")
 
 
 @app.get("/api/analyses/{analysis_id}/pharmacies")
@@ -412,28 +428,36 @@ async def find_pharmacies(request: Request, analysis_id: str, pin: str | None = 
     if settings.authentication_enabled or user is not None:
         user = require_role(request, "patient")
         profile = get_user(user["id"])
-        analysis = get_analysis_record(analysis_id, user["id"])
-        if not analysis or not profile:
-            raise HTTPException(status_code=404, detail="Prescription analysis not found.")
-        if analysis.get("patient_review_status") not in {"confirmed", "corrected"} or analysis.get("prescription_state", "confirmed") != "confirmed":
-            raise HTTPException(status_code=409, detail="Confirm the prescription before finding pharmacies.")
-        search_pin = (pin or profile.get("pin_code") or "").strip()
-        return {"pharmacies": matching_pharmacies(search_pin, [item.get("name", "") for item in analysis.get("medications", [])])}
-
-    # Unauthenticated / local development mode
-    analysis = get_analysis_record(analysis_id, "local") or get_analysis_record(analysis_id)
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Prescription analysis not found.")
-    if analysis.get("patient_review_status") not in {"confirmed", "corrected"} or analysis.get("prescription_state", "confirmed") != "confirmed":
-        raise HTTPException(status_code=409, detail="Confirm the prescription before finding pharmacies.")
-    search_pin = (pin or "560001").strip()
-    return {"pharmacies": matching_pharmacies(search_pin, [item.get("name", "") for item in analysis.get("medications", [])])}
+        if not profile or profile.get("active") is not True:
+            raise HTTPException(status_code=403, detail="An active patient account is required.")
+        patient_id = user["id"]
+        default_pin = profile.get("pin_code") or ""
+    else:
+        patient_id = "local"
+        default_pin = "560001"
+    try:
+        analysis = confirmed_prescription(patient_id, analysis_id)
+        search_pin = (pin or default_pin).strip()
+        if not valid_pin(search_pin):
+            raise HTTPException(status_code=400, detail="Enter a valid six-digit PIN code.")
+        medications = analysis.get("medications") or []
+        return {"pharmacies": matching_pharmacies(
+            search_pin,
+            [item.get("name", "") for item in medications if isinstance(item, dict)],
+        )}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
 
 
 @app.get("/api/inventory")
 async def get_inventory(request: Request) -> dict:
     user = require_role(request, "pharmacy")
-    return {"items": pharmacy_inventory(user["id"])}
+    try:
+        return {"items": pharmacy_inventory(user["id"])}
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
 
 
 @app.post("/api/inventory", status_code=201)
@@ -467,14 +491,28 @@ async def delete_inventory(request: Request, item_id: str) -> dict:
         raise _marketplace_http_error(exc) from exc
 
 
-@app.post("/api/orders", status_code=201)
-async def request_order(request: Request, payload: OrderRequest) -> dict:
+@app.post("/api/orders")
+async def request_order(request: Request, payload: OrderRequest) -> JSONResponse:
     user = require_role(request, "patient")
     verify_csrf(request, request.headers.get("X-CSRF-Token"))
     try:
-        order_id = create_order(user["id"], **payload.model_dump())
-        append_audit_event(str(uuid.uuid4()), user["id"], "order_requested", payload.analysis_id, order_id=order_id)
-        return {"id": order_id, "status": "requested"}
+        order_id, created = create_order(user["id"], **payload.model_dump(), return_created=True)
+        if created:
+            try:
+                append_audit_event(
+                    str(uuid.uuid4()),
+                    user["id"],
+                    "order_requested",
+                    payload.analysis_id,
+                    order_id=order_id,
+                )
+            except Exception:
+                logger.warning("order_id=%s error_code=ORDER_AUDIT_FAILED", order_id)
+        status = order_detail(order_id, user)["status"]
+        return JSONResponse(
+            status_code=201 if created else 200,
+            content={"id": order_id, "status": status, "created": created},
+        )
     except Exception as exc:
         raise _marketplace_http_error(exc) from exc
 
@@ -495,7 +533,7 @@ async def submit_quote(request: Request, order_id: str, payload: QuoteRequest) -
     user = require_role(request, "pharmacy")
     verify_csrf(request, request.headers.get("X-CSRF-Token"))
     try:
-        quote_order(user["id"], order_id, payload.items)
+        quote_order(user["id"], order_id, [item.model_dump() for item in payload.items])
         return {"id": order_id, "status": "quoted"}
     except Exception as exc:
         raise _marketplace_http_error(exc) from exc
@@ -562,7 +600,11 @@ async def orders_page(request: Request) -> HTMLResponse:
     user = current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    return templates.TemplateResponse(request, "orders.html", {"orders": list_orders_for(user), "app_name": settings.app_name,
+    try:
+        orders_for_user = list_orders_for(user)
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
+    return templates.TemplateResponse(request, "orders.html", {"orders": orders_for_user, "app_name": settings.app_name,
                                                                    "user": user, "csrf_token": csrf_token(request), "current": "orders"})
 
 
@@ -576,15 +618,20 @@ async def order_page(request: Request, order_id: str) -> HTMLResponse:
     except Exception as exc:
         raise _marketplace_http_error(exc) from exc
     return templates.TemplateResponse(request, "order.html", {"order": order, "app_name": settings.app_name,
-                                                                  "inventory": pharmacy_inventory(user["id"]) if user["role"] == "pharmacy" else [],
+                                                                  "inventory": pharmacy_inventory(user["id"], active_only=True) if user["role"] == "pharmacy" else [],
                                                                   "user": user, "csrf_token": csrf_token(request), "current": "orders"})
 
 
 @app.get("/pharmacy", response_class=HTMLResponse)
 async def pharmacy_page(request: Request) -> HTMLResponse:
     user = require_role(request, "pharmacy")
+    try:
+        inventory_items = pharmacy_inventory(user["id"])
+        pharmacy_orders = list_orders_for(user)
+    except Exception as exc:
+        raise _marketplace_http_error(exc) from exc
     return templates.TemplateResponse(request, "pharmacy.html", {"profile": get_pharmacy_by_user(user["id"]),
-                                                                     "inventory": pharmacy_inventory(user["id"]), "orders": list_orders_for(user),
+                                                                     "inventory": inventory_items, "orders": pharmacy_orders,
                                                                      "app_name": settings.app_name, "user": user, "csrf_token": csrf_token(request), "current": "pharmacy"})
 
 

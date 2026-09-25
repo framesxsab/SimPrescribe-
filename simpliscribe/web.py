@@ -711,6 +711,13 @@ async def prescription_source(request: Request, analysis_id: str) -> FileRespons
     source = get_prescription_file(analysis_id)
     if not source:
         raise HTTPException(status_code=404, detail="Prescription source not found or expired.")
+    expires_at = source["expires_at"]
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=404, detail="Prescription source not found or expired.")
     allowed = user["role"] in {"admin", "reviewer"} or source["owner_id"] == user["id"]
     if user["role"] == "pharmacy":
         allowed = pharmacy_can_access_analysis(user["id"], analysis_id)

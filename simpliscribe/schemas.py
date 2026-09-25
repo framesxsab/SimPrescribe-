@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal, Mapping
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
 
 HEADER_FIELDS = ("patient_name", "doctor_name", "date")
 PIPELINE_CORE_FIELDS = (
@@ -74,21 +74,40 @@ class PatientReviewRequest(BaseModel):
 class InventoryRequest(BaseModel):
     medicine_name: str = Field(min_length=1, max_length=255)
     unit_label: str = Field(default="pack", min_length=1, max_length=128)
-    price_paise: int = Field(ge=0)
-    stock_quantity: int = Field(ge=0)
-    active: bool = True
+    price_paise: StrictInt = Field(ge=0, le=2**31 - 1)
+    stock_quantity: StrictInt = Field(ge=0, le=2**31 - 1)
+    active: StrictBool = True
 
 
 class OrderRequest(BaseModel):
-    analysis_id: str
-    pharmacy_id: str
+    analysis_id: str = Field(min_length=1, max_length=36)
+    pharmacy_id: str = Field(min_length=1, max_length=36)
     fulfillment_mode: Literal["pickup", "delivery"]
     delivery_address: str = Field(default="", max_length=1000)
-    generic_inquiries: list[int] = Field(default_factory=list, max_length=50)
+    generic_inquiries: list[StrictInt] = Field(default_factory=list, max_length=50)
+
+
+class QuoteLineRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=36)
+    availability: Literal["available", "unavailable"]
+    inventory_id: str | None = None
+    verified_quantity: StrictInt | None = Field(default=None, ge=1, le=2**31 - 1)
+    unit_price_paise: StrictInt | None = Field(default=None, ge=0, le=2**31 - 1)
+    pharmacist_note: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def available_line_has_verified_values(self):
+        if self.availability == "available" and (
+            not self.inventory_id or self.verified_quantity is None or self.unit_price_paise is None
+        ):
+            raise ValueError("Available lines require an inventory item, quantity, and unit price.")
+        return self
 
 
 class QuoteRequest(BaseModel):
-    items: list[dict[str, Any]] = Field(min_length=1, max_length=50)
+    items: list[QuoteLineRequest] = Field(min_length=1, max_length=50)
 
 
 class TransitionRequest(BaseModel):
