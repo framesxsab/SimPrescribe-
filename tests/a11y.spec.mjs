@@ -44,7 +44,24 @@ test.beforeEach(async ({ page }) => {
 
 for (const [name, path] of routes) {
   test("axe " + name, async ({ page }) => {
-    const response = await page.goto(baseUrl + path, { waitUntil: "domcontentloaded" });
+    let response;
+    if (name === "details") {
+      const navigation = page.goto(baseUrl + path, { waitUntil: "domcontentloaded" });
+      const independentRequest = page.context().request.get(baseUrl + "/api/live");
+      const [detailsResponse, liveResponse] = await Promise.all([navigation, independentRequest]);
+      response = detailsResponse;
+      expect(liveResponse.status()).toBe(200);
+      expect(await liveResponse.json()).toEqual({ status: "alive" });
+      const availableReferenceCount = await page.getByText(/Possible options to discuss/).count();
+      const unavailableReferenceCount = await page.getByText(
+        "Optional medicine reference details are temporarily unavailable",
+      ).count();
+      expect(availableReferenceCount + unavailableReferenceCount).toBe(1);
+      const visibleText = await page.locator("body").innerText();
+      expect(visibleText).not.toMatch(/Traceback|optional_reference_index\.sqlite|[A-Z]:\\Users\\/i);
+    } else {
+      response = await page.goto(baseUrl + path, { waitUntil: "domcontentloaded" });
+    }
     console.log(name + ": status=" + (response?.status() ?? "none") + " url=" + page.url());
     if (!response || response.status() >= 400) {
       test.skip(true, path + " returned " + (response?.status() ?? "no response"));

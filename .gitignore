@@ -29,6 +29,9 @@ data/*.db-wal
 data/medicine_lexicon.sqlite
 data/medicine_lexicon.sqlite-shm
 data/medicine_lexicon.sqlite-wal
+data/medicine_optional_references.sqlite
+data/medicine_optional_references.sqlite-shm
+data/medicine_optional_references.sqlite-wal
 data/benchmark_runs/
 data/coverage.xml
 .coverage

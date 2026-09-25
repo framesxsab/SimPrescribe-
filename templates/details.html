@@ -158,6 +158,11 @@
                 </div>
 
                 <!-- Per-medication detailed panels -->
+                {% if analysis.medications and analysis.medications|selectattr('optional_references_unavailable')|list %}
+                <p class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700" role="status">
+                    Optional medicine reference details are temporarily unavailable. The prescription information remains available for review.
+                </p>
+                {% endif %}
                 {% if analysis.medications %}
                 <div class="mt-8 space-y-4">
                     {% for med in analysis.medications %}

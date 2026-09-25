@@ -344,49 +344,93 @@ def load_medicine_lexicon() -> dict[str, MedicineEntry]:
 
 
 OPTIONAL_REFERENCE_FIELDS = ("substitutes", "uses", "side_effects")
+_optional_reference_warning_sent = False
 
 
-@lru_cache(maxsize=1)
-def _load_optional_reference_fields() -> dict[str, dict[str, tuple[str, ...]]]:
-    fields: dict[str, dict[str, tuple[str, ...]]] = {}
-    for row in _dataset_rows(settings.medicine_database_dataset):
-        name = clean_value(row.get("name"))
-        if not name:
-            continue
-        key = normalize_text(name)
-        current = fields.setdefault(key, {field: () for field in OPTIONAL_REFERENCE_FIELDS})
-        for output, prefix, limit in (("substitutes", "substitute", 5), ("uses", "use", 5), ("side_effects", "sideEffect", 42)):
-            values = collect_series(row, prefix, limit)
-            current[output] = tuple(dict.fromkeys((*current[output], *values)))
-    return fields
-
-
-def load_optional_reference_fields() -> dict[str, dict[str, tuple[str, ...]]]:
+def _warn_optional_reference_unavailable() -> None:
+    global _optional_reference_warning_sent
     with _optional_reference_lock:
-        return _load_optional_reference_fields()
+        if _optional_reference_warning_sent:
+            return
+        _optional_reference_warning_sent = True
+    logger.warning(
+        "Optional medicine reference information is unavailable; "
+        "error_code=OPTIONAL_REFERENCE_INDEX_UNAVAILABLE"
+    )
 
 
-def hydrate_medicine_entry(entry: MedicineEntry | None) -> MedicineEntry | None:
-    if entry is None or any(getattr(entry, field) for field in OPTIONAL_REFERENCE_FIELDS):
-        return entry
-    optional = load_optional_reference_fields().get(normalize_text(entry.name))
+def _merge_optional_reference_fields(
+    entry: MedicineEntry,
+    optional: dict[str, Any] | None,
+) -> MedicineEntry:
     if not optional:
         return entry
     return merge_entries(entry, MedicineEntry(
         name=entry.name, composition="", category="", dosage_form="", manufacturer="", pack_size="",
         therapeutic_class="", chemical_class="", action_class="",
-        substitutes=optional["substitutes"], uses=optional["uses"], side_effects=optional["side_effects"], sources=(),
+        substitutes=tuple(optional.get("substitutes") or ()),
+        uses=tuple(optional.get("uses") or ()),
+        side_effects=tuple(optional.get("side_effects") or ()),
+        sources=(),
     ))
 
 
+def load_optional_reference_fields(medicine_name: str) -> dict[str, Any] | None:
+    from .optional_reference_index import load_current_index
+
+    try:
+        index = load_current_index()
+        if index is None:
+            _warn_optional_reference_unavailable()
+            return None
+        return index.lookup(normalize_text(str(medicine_name or ""))) or {
+            "substitutes": (),
+            "uses": (),
+            "side_effects": (),
+            "provenance": (),
+        }
+    except Exception:
+        _warn_optional_reference_unavailable()
+        return None
+
+
+def hydrate_medicine_entry(entry: MedicineEntry | None) -> MedicineEntry | None:
+    if entry is None or any(getattr(entry, field) for field in OPTIONAL_REFERENCE_FIELDS):
+        return entry
+    optional = load_optional_reference_fields(entry.name)
+    return _merge_optional_reference_fields(entry, optional)
+
+
 def hydrate_medication_references(medications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from .optional_reference_index import load_current_index
+
+    try:
+        optional_index = load_current_index()
+    except Exception:
+        optional_index = None
+    references_unavailable = optional_index is None
+    if references_unavailable:
+        _warn_optional_reference_unavailable()
+
     for medication in medications:
         match = find_medicine_match(str(medication.get("name") or ""))
-        entry = hydrate_medicine_entry(match.entry if match else None)
-        reference = dataset_payload(entry, match, include_optional=True)
+        entry = match.entry if match else None
+        if entry is not None and optional_index is not None:
+            try:
+                optional = optional_index.lookup(normalize_text(entry.name))
+            except Exception:
+                optional_index = None
+                references_unavailable = True
+                _warn_optional_reference_unavailable()
+            else:
+                entry = _merge_optional_reference_fields(entry, optional)
+        reference = dataset_payload(entry, match, include_optional=False)
         for field in OPTIONAL_REFERENCE_FIELDS:
             if reference[field] and not medication.get(field):
                 medication[field] = reference[field]
+    if references_unavailable:
+        for medication in medications:
+            medication["optional_references_unavailable"] = True
     return medications
 
 

@@ -208,7 +208,7 @@ def test_upload_handoff_shows_saved_stage_and_processes_once(monkeypatch):
 
 def test_fallback_core_does_not_run_composition_enrichment(monkeypatch):
     monkeypatch.setattr("simpliscribe.inference._attach_alternatives", lambda _: (_ for _ in ()).throw(AssertionError("core fallback should not enrich alternatives")))
-    monkeypatch.setattr("simpliscribe.inference.load_optional_reference_fields", lambda: (_ for _ in ()).throw(AssertionError("core fallback should not load optional reference fields")))
+    monkeypatch.setattr("simpliscribe.inference.load_optional_reference_fields", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("core fallback should not load optional reference fields")))
     result = structure_medications("Paracetamol 650 tab od 5 days")
     assert result["medications"]
 
@@ -220,8 +220,8 @@ def test_optional_reference_fields_hydrate_on_request(monkeypatch):
         name="Paracetamol", composition="", category="General", dosage_form="Tablet", manufacturer="", pack_size="",
         therapeutic_class="", chemical_class="", action_class="", substitutes=(), uses=(), side_effects=(), sources=(),
     )
-    monkeypatch.setattr("simpliscribe.inference.load_optional_reference_fields", lambda: {
-        "paracetamol": {"substitutes": ("Dolo 650",), "uses": ("Pain relief",), "side_effects": ("Nausea",)},
+    monkeypatch.setattr("simpliscribe.inference.load_optional_reference_fields", lambda _name: {
+        "substitutes": ("Dolo 650",), "uses": ("Pain relief",), "side_effects": ("Nausea",), "provenance": ("Medicine Database",),
     })
     hydrated = hydrate_medicine_entry(entry)
     assert hydrated.substitutes == ("Dolo 650",)

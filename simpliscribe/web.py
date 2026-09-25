@@ -169,7 +169,9 @@ async def render_details(request: Request, analysis_id: str, templates) -> HTMLR
     elif not settings.authentication_enabled:
         can_edit = True
         show_patient_marketplace = True
-    analysis["medications"] = hydrate_medication_references(analysis.get("medications") or [])
+    analysis["medications"] = await asyncio.to_thread(
+        hydrate_medication_references, analysis.get("medications") or []
+    )
     breadcrumbs = [
         {"href": "/", "label": "Dashboard"},
         {"href": "/history", "label": "Prescriptions"},
@@ -204,7 +206,9 @@ async def download_report(request: Request, analysis_id: str) -> Response:
         return JSONResponse(status_code=503, content={"error_code": "REPORT_UNAVAILABLE", "analysis_id": analysis_id, "error": "The prescription is not ready for a report."})
 
     try:
-        analysis["medications"] = hydrate_medication_references(analysis.get("medications") or [])
+        analysis["medications"] = await asyncio.to_thread(
+            hydrate_medication_references, analysis.get("medications") or []
+        )
         with timed_stage(analysis_id, "report_generation"):
             pdf_bytes = build_pdf_report(analysis, settings.app_name)
     except Exception:
