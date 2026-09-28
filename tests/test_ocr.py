@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from threading import Lock
-from time import sleep
+from threading import Event, Lock
+from time import perf_counter, sleep
 from types import SimpleNamespace
 
 import fitz
@@ -37,6 +37,28 @@ def test_ocr_reader_initializes_once_under_concurrent_first_access(monkeypatch):
 
     assert calls == 1
     assert all(reader is readers[0] for reader in readers)
+
+
+def test_ocr_state_read_does_not_wait_for_reader_construction():
+    entered, release = Event(), Event()
+
+    def hold_reader_lock():
+        with ocr._ocr_reader_lock:
+            entered.set()
+            release.wait(2)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(hold_reader_lock)
+        assert entered.wait(1)
+        try:
+            started = perf_counter()
+            ocr.get_ocr_state()
+            elapsed = perf_counter() - started
+        finally:
+            release.set()
+        future.result()
+
+    assert elapsed < 0.5
 
 
 def test_ocr_warmup_failure_can_recover_without_restart(monkeypatch):

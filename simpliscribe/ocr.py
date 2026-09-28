@@ -206,10 +206,8 @@ def get_ocr_reader() -> Any:
 
 
 def get_ocr_state() -> dict[str, Any]:
-    with _ocr_reader_lock:
-        ready = _ocr_state == "ready" and _ocr_reader is not None
-        state = _ocr_state if _ocr_reader is not None or _ocr_state != "ready" else "not_started"
-        return {"state": state, "ready": ready, "error_code": _ocr_error_code if state != "not_started" else None}
+    state = _ocr_state if _ocr_reader is not None or _ocr_state != "ready" else "not_started"
+    return {"state": state, "ready": state == "ready", "error_code": _ocr_error_code if state != "not_started" else None}
 
 
 def warm_ocr_reader() -> bool:
