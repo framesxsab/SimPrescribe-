@@ -102,6 +102,7 @@ def test_health_includes_database_ready():
     payload = client.get("/api/health").json()
     assert payload["clinical_use"] == "human_review_required"
     assert payload["database_ready"] is True
+    assert isinstance(payload["lexicon_index_ready"], bool)
     assert "status" in payload
 
 

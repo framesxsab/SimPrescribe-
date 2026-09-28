@@ -1,9 +1,15 @@
 .git
 .venv
+.venv-windows*
+node_modules
+tmp
 *.env
 !.env.example
 __pycache__
 uploads
+data/prescriptions
+data/*.sqlite
+data/*.sqlite-*
 data/*.jpg
 data/*.jpeg
 data/*.png

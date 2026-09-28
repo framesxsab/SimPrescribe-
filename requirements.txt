@@ -4,8 +4,11 @@ huggingface_hub==1.6.0
 httpx==0.28.1
 Jinja2==3.1.6
 pandas==3.0.1
+numpy==2.4.6
+opencv-contrib-python==4.10.0.84
 paddleocr==3.4.0
 paddlepaddle==3.2.2
+paddlex==3.4.3
 Pillow==12.1.1
 PyMuPDF==1.27.2
 pyarrow==23.0.1

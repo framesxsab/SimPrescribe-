@@ -154,6 +154,7 @@ def test_health_route_exposes_review_boundary():
     assert payload["clinical_use"] == "human_review_required"
     assert payload["ocr_state"] in {"not_started", "initializing", "ready", "failed"}
     assert isinstance(payload["ocr_ready"], bool)
+    assert isinstance(payload["lexicon_index_ready"], bool)
 
 
 def test_authentication_redirects_and_creates_secure_session():

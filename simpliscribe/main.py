@@ -16,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
 from .metrics import generate_prometheus_metrics, get_metrics_snapshot, record_http_request
+from .inference import load_persistent_lexicon_index
 from .retrieval import get_retriever, get_vector_cache
 from .marketplace import MarketplaceConflict, accept_order, cancel_order, confirmed_prescription, create_order, deactivate_inventory_item, decline_order, list_orders_for, matching_pharmacies, order_detail, pharmacy_inventory, pharmacy_transition, quote_order, save_inventory_item, valid_pin
 from .schemas import CacheStatsResponse, HealthResponse, InventoryRequest, LiveResponse, OrderRequest, PatientReviewRequest, QuoteRequest, SimilarPrescriptionsResponse, TransitionRequest
@@ -29,8 +30,10 @@ logger = logging.getLogger(__name__)
 settings.validate_runtime()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)
 settings.prescription_storage_dir.mkdir(parents=True, exist_ok=True)
-ensure_schema()
 if not settings.production:
+    # Local/test compatibility bootstrap. Production databases must be migrated
+    # explicitly with Alembic before the application starts.
+    ensure_schema()
     seed_test_pharmacies()
 for expired_name in purge_expired_marketplace()[0]:
     try:
@@ -166,11 +169,13 @@ async def health() -> dict:
         settings.hf_token if settings.inference_provider == "huggingface" else settings.model_api_url
     )
     database_ready = ping_database()
+    lexicon_index_ready = load_persistent_lexicon_index() is not None
     ocr = get_ocr_state()
     return {
-        "status": "ready" if datasets_ready and provider_ready and database_ready and ocr["ready"] else "degraded",
+        "status": "ready" if datasets_ready and provider_ready and database_ready and lexicon_index_ready and ocr["ready"] else "degraded",
         "datasets_ready": datasets_ready,
         "database_ready": database_ready,
+        "lexicon_index_ready": lexicon_index_ready,
         "configured_provider": settings.inference_provider,
         "provider_ready": provider_ready,
         "clinical_use": "human_review_required",

@@ -20,6 +20,7 @@ class HealthResponse(BaseModel):
     status: str = Field(description="Service readiness state ('ready' or 'degraded').")
     datasets_ready: bool = Field(description="Whether local medicine reference datasets are loaded.")
     database_ready: bool = Field(description="Whether primary database ping succeeded.")
+    lexicon_index_ready: bool = Field(description="Whether the required fingerprinted medicine index is current.")
     configured_provider: str = Field(description="Inference provider setting (huggingface/fallback/local).")
     provider_ready: bool = Field(description="Whether the configured inference credentials/model are ready.")
     clinical_use: str = Field(default="human_review_required", description="Clinical safety statement.")

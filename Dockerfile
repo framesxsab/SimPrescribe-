@@ -4,7 +4,9 @@ ENV APP_ENV=production
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
-ENV PADDLEOCR_HOME=/app/.paddleocr
+ENV OCR_CACHE_DIR=/app/tmp/ocr-cache
+ENV PADDLE_HOME=/app/tmp/ocr-cache/paddle
+ENV PADDLE_PDX_CACHE_HOME=/app/tmp/ocr-cache/paddlex
 
 WORKDIR /app
 
@@ -18,15 +20,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout 120 --retries 10 -r requirements.txt
 
 COPY scripts/preload_ocr.py /tmp/preload_ocr.py
 ARG PRELOAD_OCR=1
-RUN mkdir -p /app/.paddleocr && \
+RUN mkdir -p /app/tmp/ocr-cache && \
     if [ "$PRELOAD_OCR" = "1" ]; then python /tmp/preload_ocr.py; \
     else echo "Skipping OCR model preload"; fi
 
 COPY . .
+
+# The source CSVs must be materialized by Git LFS before building this image.
+# Build fingerprinted indexes into /app/data so clean images do not reconstruct
+# the medicine lexicon during application startup or request handling.
+RUN python -m simpliscribe.build_lexicon_index \
+    && python -m simpliscribe.build_optional_reference_index
 
 RUN addgroup --system app && adduser --system --ingroup app app \
     && chown -R app:app /app

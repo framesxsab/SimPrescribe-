@@ -108,20 +108,68 @@ Governance and safety:
 
 ## Local development
 
+### Clean checkout prerequisites
+
+Use Python 3.11 for the full pinned runtime (the container uses 3.11.9; Windows RC validation used 3.11.15). The lightweight package metadata permits Python 3.10 or newer, but is not the complete native OCR environment. Local Python must include `venv`/`ensurepip` support; on Ubuntu install the matching `python3.X-venv` OS package when `python -m venv` reports that `ensurepip` is missing. Runtime packages are pinned in `requirements.txt`; development lint/coverage packages are in `requirements-dev.txt`. Native Linux also needs `libgl1`, `libglib2.0-0`, `libsm6`, `libxext6`, `libxrender1`, and `libgomp1` (the Dockerfile installs these). Node.js/npm are only needed for the Playwright suites. On Ubuntu, install Chromium system libraries with `npx playwright install-deps chromium` before running those suites. The full pytest suite also invokes the PostgreSQL recovery guard tests, so `pg_dump`, `pg_restore`, and `psql` from the PostgreSQL client package must be on `PATH`; the actual restore drill additionally needs a disposable PostgreSQL server.
+
+- **Source-controlled:** application code, migrations, `.env.example`, and the two medicine CSV datasets. The CSV files (`A_Z_medicines_dataset_of_India.csv`, `all_medicine databased.csv`) are Git LFS objects. Install Git LFS before cloning, run `git lfs install`, then clone and run `git lfs pull`. Without LFS, Git supplies pointer text instead of CSV data; validate with `python scripts/validate_datasets.py` before continuing.
+- **Generated at build/setup:** `data/medicine_lexicon.sqlite` is required and `data/medicine_optional_references.sqlite` is optional. Both are fingerprinted SQLite indexes generated from the LFS CSVs; neither is committed. Local setup commands below build them; Docker builds them into the image.
+- **Generated at runtime:** the local application database is created by `alembic upgrade head` (`0002_marketplace`); protected uploads are written under `data/prescriptions`; temporary upload copies go under `uploads`; OCR models are downloaded on first initialization to `tmp/ocr-cache`. Paddle and PaddleX default to subdirectories beneath that cache via `PADDLE_HOME` and `PADDLE_PDX_CACHE_HOME`. The first uncached OCR initialization needs network access to the model hosting endpoints. `INFERENCE_PROVIDER=fallback` avoids inference API credentials, not OCR models.
+- **Secret configuration:** `.env.example` contains development-only synthetic values. Copy it to an untracked `.env` for local setup; production must use unique secrets from its secret manager and must not use `.env.example`.
+
+### Linux / WSL / macOS
+
+Run from the repository root. Keep this environment separate from native Windows:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt -r requirements-dev.txt
+cp .env.example .env
+```
+
+On a minimal Linux host where `ensurepip` is unavailable and installing the matching OS `venv` package is not possible, an existing modern system `pip` can bootstrap the isolated environment: `python3.11 -m venv --without-pip .venv`, then `python3.11 -m pip --python .venv/bin/python install -r requirements.txt -r requirements-dev.txt`. Activate the environment and copy `.env.example` as above.
+
+### Windows PowerShell
+
+Use native 64-bit Python 3.11 and a separate Windows environment. Do not activate or reuse a `.venv` created by WSL/Linux: its `pyvenv.cfg` may point to `/usr/bin`.
+
+```powershell
+py -3.11 -m venv .venv-windows
+.\.venv-windows\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-dev.txt
+Copy-Item .env.example .env
+```
+
+For an existing uv-managed Python installation, `uv venv --python 3.11 --seed .venv-windows` replaces the first command. If activation is unavailable, use `.\.venv-windows\Scripts\python.exe -m ...` explicitly. The Windows RC was validated with Python 3.11.15, PaddlePaddle 3.2.2, PaddleOCR 3.4.0, PaddleX 3.4.3, NumPy 2.4.6, and only `opencv-contrib-python` 4.10.0.84. These native runtime packages are pinned in `requirements.txt`, which Docker and CI also install; `pyproject.toml` alone does not install the OCR runtime. Optional local-model dependencies remain in `requirements-local-model.txt`.
+
+Set `INFERENCE_PROVIDER=fallback` in the local `.env` for a credential-free local run. Keep `.env`, virtual environments, databases, uploads, and OCR caches out of source control. `.env.example` supplies development-only local values and must not be used as a production secret file.
+
+Run the clean-database migration and generate both local indexes before starting:
+
+```bash
+alembic upgrade head
+alembic current
+python scripts/validate_datasets.py
+python -m simpliscribe.build_lexicon_index
+python -m simpliscribe.build_optional_reference_index  # optional
+uvicorn app:app --reload
+```
+
+The database starts empty and must be migrated to Alembic head (`0002_marketplace`) before use. Development and test startup retain `ensure_schema()` as a compatibility bootstrap. Production startup does not create schema; run `alembic upgrade head` before starting the application. `DATABASE_URL`, `SESSION_SECRET`, `INFERENCE_PROVIDER`, `OCR_CACHE_DIR`, and retention values can be set in `.env`; see `.env.example` for the complete supported configuration. A shared/production deployment must set a unique `SESSION_SECRET` of at least 32 characters, PostgreSQL `DATABASE_URL`, and authentication configuration as described in [Production safety configuration](#production-safety-configuration).
+
 Create an approved demo pharmacy and starter exact-name inventory after initializing the database:
 
 ```powershell
-.venv\Scripts\python.exe scripts\seed_marketplace.py --password "choose-a-demo-password" --pin 400001
+python scripts\seed_marketplace.py --password "choose-a-demo-password" --pin 400001
 ```
 
 Patient accounts register at `/register/patient`; pharmacies register at `/register/pharmacy` and require approval at `/admin/pharmacies`.
 Patients can open `/marketplace` from the top navigation, choose an analyzed prescription, confirm its medicines, and find pharmacies serving their PIN. The marketplace needs a signed-in patient and at least one approved pharmacy to show results.
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
 uvicorn app:app --reload
 ```
 
@@ -176,7 +224,7 @@ Internal failures should still return a complete analysis shape rather than a pa
 - Hugging Face / HTTP endpoint errors fall back to the rule-based parser, with `pipeline.used_provider`, `pipeline.warnings`, and `human_review_required`.
 - If the heuristic parser or lexicon also fails, the API still returns `N/A` headers and `medications: []` plus `pipeline.degraded` and an `error_code`.
 - Unreadable scans stay `422 UNUSABLE_PRESCRIPTION`. Storage or PDF failures return `503` with `STORAGE_FAILED` or `REPORT_UNAVAILABLE`.
-- `/api/live` is a cheap process check for the container HEALTHCHECK. `/api/health` adds `database_ready` (`SELECT 1`) and reports `degraded` if datasets, the inference provider, or the database are not ready. Logs use `error_code` / `analysis_id` / provider and must not include raw OCR or patient names.
+- `/api/live` is a cheap process check for the container HEALTHCHECK. `/api/health` reports database, required lexicon-index, OCR, dataset, and inference-provider readiness; it reports `degraded` while any required component is unavailable. Logs use `error_code` / `analysis_id` / provider and must not include raw OCR or patient names.
 
 ## Benchmarking
 
@@ -339,19 +387,28 @@ alembic upgrade head
 alembic current
 ```
 
-The `simpliscribe.storage` bootstrap still auto-creates the base tables on first app start (`ensure_schema()`), so local development and the test suite keep working without a manual step. In production, run `alembic upgrade head` as part of the release and evolve the schema by adding a new revision (`alembic revision --autogenerate -m "describe change"`) rather than editing existing ones.
+Development and test startup retain `ensure_schema()` as a compatibility bootstrap. Production startup does not create schema; run `alembic upgrade head` as part of each release and evolve the schema by adding a new revision (`alembic revision --autogenerate -m "describe change"`) rather than editing existing ones.
 
 
 The review screen supports correction, confirmation, unreadable rejection, and sign-out for shared workstations. Processing copies are removed after OCR; a protected source copy remains only for the patient and authorized pharmacist workflow until retention expiry. Do not enable identifiable patient uploads until the deployment has a documented consent basis, retention owner, incident process, backup/restore test, threat model, and approved medicine-dataset licensing. See [docs/CONSENT_AND_RETENTION.md](docs/CONSENT_AND_RETENTION.md) and [docs/simpliscribe-threat-model.md](docs/simpliscribe-threat-model.md). Configure request-size limits at the ingress/proxy as well as `MAX_UPLOAD_MB`; multipart bodies reach the server before application validation.
 
 ```bash
 docker build -t simpliscribe .
+docker run --rm --env-file production.env simpliscribe alembic upgrade head
 docker run --rm -p 127.0.0.1:7860:7860 --env-file production.env simpliscribe
 ```
 
-CI builds the image with `--build-arg PRELOAD_OCR=0` so the job does not download OCR weights. Production images should keep the default `PRELOAD_OCR=1`.
+The Docker image sets `OCR_CACHE_DIR`, `PADDLE_HOME`, and `PADDLE_PDX_CACHE_HOME` to the same writable `/app/tmp/ocr-cache` tree during model preload and runtime. The Docker build generates both fingerprinted medicine indexes into the image after copying the LFS datasets. A fresh named `/app/data` volume is initialized from that image content. CI builds the image with `--build-arg PRELOAD_OCR=0` so the job does not download OCR weights. Production images should keep the default `PRELOAD_OCR=1`.
 
 The image defaults to `APP_ENV=production` and fails closed without the complete production configuration above. Keep `production.env` outside the repository and secret manager values out of `.env.example`. Production session cookies require HTTPS: keep the container bound to loopback and place a TLS-terminating reverse proxy in front of `http://127.0.0.1:7860`; do not expose or browse the raw HTTP port directly. Use the local `uvicorn` workflow, not a remotely reachable Docker container, for unauthenticated development.
+
+For the bundled Compose stack, set `POSTGRES_PASSWORD` to a URL-safe secret, `SESSION_SECRET` to a unique value of at least 32 characters, and `ADMIN_EMAIL`/`ADMIN_PASSWORD` from a secret manager. The file has no credential defaults. The bundled Nginx listener binds only to `127.0.0.1:8080`; terminate HTTPS in a separate trusted ingress before routing traffic there. Migrate the fresh database before starting the app:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d db
+docker compose -f docker-compose.prod.yml run --rm web alembic upgrade head
+docker compose -f docker-compose.prod.yml up -d web nginx
+```
 
 ## Hugging Face Spaces
 

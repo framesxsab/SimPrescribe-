@@ -14,6 +14,7 @@ test-results/
 tmp/
 tmp/ocr-cache/
 .venv/
+.venv-windows*/
 node_modules/
 archive (3)/
 synthetic_prescription_dataset/
