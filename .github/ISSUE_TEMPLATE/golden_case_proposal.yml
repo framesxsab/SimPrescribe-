@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Golden cases help prevent OCR/LLM regression on challenging handwritten notations, look-alike drugs, and critical dosage timings.
-        **CRITICAL**: Do NOT submit images or text with any personally identifiable information (PHI).
+        Golden cases help catch regressions on synthetic or consented, fully de-identified text.
+        **Do not attach prescription images or include real patient identifiers, dates, contact details, or other PHI.** Never submit secrets or private records.
   - type: input
     id: case_id
     attributes:

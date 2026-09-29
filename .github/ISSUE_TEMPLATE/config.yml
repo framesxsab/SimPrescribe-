@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/framesxsab/SimPrescribe-/security/advisories/new
+    about: Do not post vulnerabilities, credentials, or patient data in a public issue.
+  - name: Setup and support guidance
+    url: https://github.com/framesxsab/SimPrescribe-/blob/main/SUPPORT.md
+    about: Check the supported local setup and privacy-safe issue channels.

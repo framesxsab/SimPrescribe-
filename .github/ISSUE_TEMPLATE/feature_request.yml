@@ -2,6 +2,9 @@ name: Feature Request
 description: Propose a new feature, workflow enhancement, or integration for SimpliScribe
 labels: ["enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: SimpliScribe helps patients review an existing prescription. It does not diagnose, prescribe, independently determine treatment, or automatically substitute medicines. Requests must preserve human review.
   - type: textarea
     id: problem
     attributes:

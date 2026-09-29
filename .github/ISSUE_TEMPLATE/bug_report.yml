@@ -4,7 +4,8 @@ labels: ["bug"]
 body:
   - type: markdown
     attributes:
-      value: Thank you for reporting an issue! Please do NOT post any real patient identification or unconsented medical images.
+      value: |
+        Include only sanitized diagnostics. Do not attach real prescription images or include patient identifiers, secrets, tokens, cookies, database rows, or private filesystem paths.
   - type: textarea
     id: description
     attributes:
@@ -25,10 +26,32 @@ body:
     validations:
       required: true
   - type: input
+    id: app_version
+    attributes:
+      label: SimpliScribe version or commit
+      description: For a source checkout, include the commit SHA.
+      placeholder: "0.2.0rc1 or a commit SHA"
+    validations:
+      required: true
+  - type: input
     id: environment
     attributes:
       label: Environment Info
-      description: OS version, Python version, Browser, Docker setup.
-      placeholder: "Windows 11 / Ubuntu 22.04, Python 3.11, Chrome 120"
+      description: Operating system, Python version, and browser or Docker details when relevant.
+      placeholder: "Windows 11, Python 3.11.15, Chrome 140"
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized_logs
+    attributes:
+      label: Sanitized logs
+      description: Remove patient information, prescription text/images, credentials, tokens, cookies, and local personal paths before pasting.
     validations:
       required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I have not included real patient data, unconsented prescription material, or secrets.
+          required: true
