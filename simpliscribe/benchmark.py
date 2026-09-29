@@ -9,12 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .config import settings
 from .inference import structure_medications
 from .ocr import extract_ocr_text
 
-DEFAULT_BENCHMARK_CASES = Path(__file__).resolve().parent.parent / "data" / "benchmark_cases.sample.json"
-DEFAULT_GOLDEN_CASES = Path(__file__).resolve().parent.parent / "data" / "golden_cases.v1.json"
-DEFAULT_BENCHMARK_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "benchmark_runs"
+DEFAULT_BENCHMARK_CASES = settings.data_dir / "benchmark_cases.sample.json"
+DEFAULT_GOLDEN_CASES = settings.data_dir / "golden_cases.v1.json"
+DEFAULT_BENCHMARK_OUTPUT_DIR = settings.data_dir / "benchmark_runs"
 SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
 SCORABLE_FIELDS = ("name", "type", "dosage", "frequency", "duration")
 SUPPORTED_PARQUET_SUFFIXES = {".parquet"}

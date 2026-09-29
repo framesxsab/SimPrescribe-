@@ -1,11 +1,15 @@
 import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+if not (BASE_DIR / "templates").is_dir() and (Path(sys.prefix) / "templates").is_dir():
+    BASE_DIR = Path(sys.prefix)
+dotenv_path = BASE_DIR / ".env"
+load_dotenv(dotenv_path if dotenv_path.is_file() else Path.cwd() / ".env")
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
 

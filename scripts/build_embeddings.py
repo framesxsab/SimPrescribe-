@@ -15,11 +15,12 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from simpliscribe.retrieval import FastPrescriptionRetriever, PrescriptionEmbedder, VectorIndex
+from simpliscribe.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("build_embeddings")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = settings.root_dir
 DEFAULT_GOLDEN_PATH = BASE_DIR / "data" / "golden_cases.v1.json"
 DEFAULT_SYNTHETIC_LABELS = BASE_DIR / "synthetic_prescription_dataset" / "labels.csv"
 DEFAULT_OUTPUT_INDEX = BASE_DIR / "data" / "embeddings" / "prescriptions_index.npz"

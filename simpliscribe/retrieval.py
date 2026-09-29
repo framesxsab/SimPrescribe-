@@ -12,10 +12,12 @@ from typing import Any
 
 import numpy as np
 
+from .config import settings
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_DIM = 384
-DEFAULT_INDEX_PATH = Path(__file__).resolve().parent.parent / "data" / "embeddings" / "prescriptions_index.npz"
+DEFAULT_INDEX_PATH = settings.data_dir / "embeddings" / "prescriptions_index.npz"
 
 
 def _tokenize_text(text: str) -> list[str]:
@@ -398,4 +400,3 @@ def get_vector_cache() -> VectorCache:
     if _global_vector_cache is None:
         _global_vector_cache = VectorCache()
     return _global_vector_cache
-

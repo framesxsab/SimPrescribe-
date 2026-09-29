@@ -1,0 +1,26 @@
+include .env.example LICENSE README.md THIRD_PARTY_NOTICES.md
+include CONTRIBUTING.md SECURITY.md SUPPORT.md CODE_OF_CONDUCT.md CHANGELOG.md
+include pyproject.toml package.json package-lock.json requirements.txt requirements-dev.txt requirements-local-model.txt
+include alembic.ini
+include A_Z_medicines_dataset_of_India.csv
+include all_medicine?databased.csv
+include scripts/*.py scripts/*.ps1 scripts/*.sh
+recursive-include simpliscribe *.py
+recursive-include templates *.html
+recursive-include static *.css *.js *.svg
+recursive-include alembic *.py *.mako
+recursive-include data *.json
+recursive-include docs *.md *.puml
+recursive-include tests *.py *.mjs
+exclude .env
+prune .git
+prune node_modules
+prune tmp
+prune uploads
+prune test-results
+prune dist
+prune build
+prune .venv
+prune .venv-windows-rc
+global-exclude *.py[cod] *.sqlite *.sqlite-* *.db *.db-* *.npz *.onnx *.pdparams
+prune data/benchmark_runs

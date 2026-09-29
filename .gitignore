@@ -15,6 +15,9 @@ tmp/
 tmp/ocr-cache/
 .venv/
 .venv-windows*/
+/build/
+/dist/
+*.egg-info/
 node_modules/
 archive (3)/
 synthetic_prescription_dataset/
@@ -42,4 +45,3 @@ htmlcov/
 .omo/
 *.pdf
 uv.lock
-
