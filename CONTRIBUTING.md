@@ -24,6 +24,8 @@ Copy-Item .env.example .env
 
 Validate source data with `python scripts/validate_datasets.py`. For a fresh database, run `alembic upgrade head`, then build the required index with `python -m simpliscribe.build_lexicon_index`. `python -m simpliscribe.build_optional_reference_index` builds the optional references.
 
+Prescription similarity retrieval is an optional developer/research feature. Build its ignored golden-only index with `python scripts/build_embeddings.py` or `simpliscribe-index`; larger local builds can pass `--labels path/to/labels.csv`. External labels are not bundled.
+
 The bundled CSV datasets are CC BY-SA 4.0, separately from the MIT code. Read [dataset provenance](docs/DATASET_PROVENANCE.md) and [third-party notices](THIRD_PARTY_NOTICES.md) before changing or redistributing them. New data requires an exact source, version, matching checksum, and redistribution terms.
 
 ## Checks before a pull request

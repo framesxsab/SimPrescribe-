@@ -168,6 +168,10 @@ uvicorn app:app --reload
 
 The database starts empty and must be migrated to Alembic head (`0002_marketplace`) before use. Development and test startup retain `ensure_schema()` as a compatibility bootstrap. Production startup does not create schema; run `alembic upgrade head` before starting the application. `DATABASE_URL`, `SESSION_SECRET`, `INFERENCE_PROVIDER`, `OCR_CACHE_DIR`, and retention values can be set in `.env`; see `.env.example` for the complete supported configuration. A shared/production deployment must set a unique `SESSION_SECRET` of at least 32 characters, PostgreSQL `DATABASE_URL`, and authentication configuration as described in [Production safety configuration](#production-safety-configuration).
 
+### Optional prescription similarity index
+
+This developer/research feature is separate from the patient prescription workflow. Clean source and wheel installs start with no similarity index; `/api/retrieval/similar` safely returns an empty result list until one is built. In a source checkout, run `python scripts/build_embeddings.py` (or `simpliscribe-index`) to build an ignored index from the tracked golden cases before starting the app; restart the app after building if it was already running. To add a larger local dataset, pass `--labels path/to/labels.csv`; that file is user-supplied and is not bundled.
+
 ## Build and install a Python distribution
 
 The wheel includes the app entry module, templates, static assets, Alembic migrations, the licensed CSV datasets, and third-party notices. Generated SQLite indexes, local databases, uploads, OCR models, vector caches, and virtual environments are excluded.

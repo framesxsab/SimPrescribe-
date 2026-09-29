@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from starlette.testclient import TestClient
 
+from scripts import build_embeddings
 from simpliscribe.main import app
 from simpliscribe.retrieval import FastPrescriptionRetriever, PrescriptionEmbedder, VectorIndex
 
@@ -104,6 +106,68 @@ def test_fast_prescription_retriever(tmp_path: Path):
     assert index_file.exists()
 
 
+def test_missing_similarity_index_is_safe(tmp_path: Path):
+    retriever = FastPrescriptionRetriever(index_path=tmp_path / "missing.npz")
+
+    assert not retriever.is_ready()
+    assert retriever.query_similar("Paracetamol 650 tab od") == []
+
+
+def test_default_similarity_index_build_uses_golden_cases_only(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        build_embeddings,
+        "load_synthetic_prescriptions",
+        lambda *args, **kwargs: pytest.fail("default build must not request external labels"),
+    )
+    output = tmp_path / "golden-only.npz"
+
+    build_embeddings.build_and_save_index(output_path=output)
+
+    index = VectorIndex.load(output)
+    assert len(index) == 10
+    assert {item["source"] for item in index.metadatas} == {"golden_cases_v1"}
+    matches = FastPrescriptionRetriever(index_path=output).query_similar(
+        "Paracetamol 650 tab od 5 days", min_similarity=0.2
+    )
+    assert any(match["id"] == "golden:clean-single-tablet" for match in matches)
+
+
+def test_external_similarity_labels_are_optional_and_paths_are_not_indexed(tmp_path: Path):
+    labels_path = tmp_path / "private-labels.csv"
+    image_path = tmp_path / "private" / "prescription-image.png"
+    labels_path.write_text(
+        "image,medicine,dosage,frequency\n"
+        f"{image_path},Amoxicillin,500 mg,twice daily\n",
+        encoding="utf-8-sig",
+    )
+    output = tmp_path / "combined.npz"
+
+    build_embeddings.build_and_save_index(labels_path=labels_path, output_path=output)
+
+    index = VectorIndex.load(output)
+    assert len(index) == 11
+    assert {item["source"] for item in index.metadatas} == {"golden_cases_v1", "synthetic_dataset"}
+    serialized_index = repr(index.item_ids) + repr(index.metadatas)
+    assert str(labels_path) not in serialized_index
+    assert str(image_path) not in serialized_index
+
+
+def test_empty_similarity_build_fails_without_writing_an_index(tmp_path: Path):
+    golden_path = tmp_path / "empty.json"
+    output = tmp_path / "empty.npz"
+    golden_path.write_text('{"cases": []}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="No usable prescription records"):
+        build_embeddings.build_and_save_index(golden_path=golden_path, output_path=output)
+
+    assert not output.exists()
+
+
+def test_explicit_missing_external_labels_fail_clearly(tmp_path: Path):
+    with pytest.raises(FileNotFoundError, match="Synthetic labels CSV not found"):
+        build_embeddings.load_synthetic_prescriptions(tmp_path / "missing.csv")
+
+
 def test_similar_prescriptions_api():
     client = TestClient(app)
     response = client.get("/api/retrieval/similar?q=Paracetamol&limit=3")
@@ -154,4 +218,3 @@ def test_cache_stats_and_clear_api():
     clear_res = client.post("/api/cache/clear")
     assert clear_res.status_code == 200
     assert clear_res.json()["status"] == "cleared"
-

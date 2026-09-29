@@ -15,6 +15,7 @@ recursive-include tests *.py *.mjs
 exclude .env
 prune .git
 prune node_modules
+prune synthetic_prescription_dataset
 prune tmp
 prune uploads
 prune test-results

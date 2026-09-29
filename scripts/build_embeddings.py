@@ -22,7 +22,6 @@ logger = logging.getLogger("build_embeddings")
 
 BASE_DIR = settings.root_dir
 DEFAULT_GOLDEN_PATH = BASE_DIR / "data" / "golden_cases.v1.json"
-DEFAULT_SYNTHETIC_LABELS = BASE_DIR / "synthetic_prescription_dataset" / "labels.csv"
 DEFAULT_OUTPUT_INDEX = BASE_DIR / "data" / "embeddings" / "prescriptions_index.npz"
 
 
@@ -51,13 +50,12 @@ def load_golden_cases(golden_path: Path) -> list[dict[str, Any]]:
 
 
 def load_synthetic_prescriptions(labels_path: Path, limit: int | None = None) -> list[dict[str, Any]]:
-    if not labels_path.exists():
-        logger.warning("Synthetic labels CSV not found: %s", labels_path)
-        return []
+    if not labels_path.is_file():
+        raise FileNotFoundError(f"Synthetic labels CSV not found: {labels_path}")
 
     # Group medicines by image
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
-    with labels_path.open(encoding="utf-8") as f:
+    with labels_path.open(encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
             img = str(row.get("image") or "").strip()
@@ -68,7 +66,7 @@ def load_synthetic_prescriptions(labels_path: Path, limit: int | None = None) ->
                 grouped[img].append({"name": med, "dosage": dos, "frequency": freq})
 
     records: list[dict[str, Any]] = []
-    for img_name, meds in grouped.items():
+    for record_number, meds in enumerate(grouped.values(), start=1):
         if limit is not None and len(records) >= limit:
             break
         # Build composite prescription raw text representation
@@ -76,7 +74,7 @@ def load_synthetic_prescriptions(labels_path: Path, limit: int | None = None) ->
         raw_text = "\n".join(lines)
         records.append(
             {
-                "id": f"synthetic:{img_name}",
+                "id": f"synthetic:{record_number}",
                 "raw_text": raw_text,
                 "medicines": meds,
                 "source": "synthetic_dataset",
@@ -127,13 +125,16 @@ def benchmark_retrieval(retriever: FastPrescriptionRetriever, query_cases: list[
 
 def build_and_save_index(
     golden_path: Path = DEFAULT_GOLDEN_PATH,
-    labels_path: Path = DEFAULT_SYNTHETIC_LABELS,
+    labels_path: Path | None = None,
     output_path: Path = DEFAULT_OUTPUT_INDEX,
     synthetic_limit: int | None = None,
     run_benchmark: bool = False,
 ) -> None:
     records = load_golden_cases(golden_path)
-    records.extend(load_synthetic_prescriptions(labels_path, limit=synthetic_limit))
+    if labels_path is not None:
+        records.extend(load_synthetic_prescriptions(labels_path, limit=synthetic_limit))
+    if not records:
+        raise ValueError("No usable prescription records found; no similarity index was written.")
 
     logger.info("Building embeddings for %d total prescription cases...", len(records))
     t0 = time.perf_counter()
@@ -166,19 +167,22 @@ def build_and_save_index(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build and benchmark prescription embeddings index.")
     parser.add_argument("--golden", type=Path, default=DEFAULT_GOLDEN_PATH, help="Path to golden cases JSON.")
-    parser.add_argument("--labels", type=Path, default=DEFAULT_SYNTHETIC_LABELS, help="Path to synthetic labels CSV.")
+    parser.add_argument("--labels", type=Path, default=None, help="Optional external synthetic labels CSV to append.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_INDEX, help="Output path for embeddings index (.npz).")
     parser.add_argument("--sample", type=int, default=None, help="Limit number of synthetic prescriptions to index.")
     parser.add_argument("--benchmark", action="store_true", help="Run retrieval latency and throughput benchmark.")
     args = parser.parse_args()
 
-    build_and_save_index(
-        golden_path=args.golden,
-        labels_path=args.labels,
-        output_path=args.output,
-        synthetic_limit=args.sample,
-        run_benchmark=args.benchmark,
-    )
+    try:
+        build_and_save_index(
+            golden_path=args.golden,
+            labels_path=args.labels,
+            output_path=args.output,
+            synthetic_limit=args.sample,
+            run_benchmark=args.benchmark,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

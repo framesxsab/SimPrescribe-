@@ -36,6 +36,7 @@ data/medicine_lexicon.sqlite-wal
 data/medicine_optional_references.sqlite
 data/medicine_optional_references.sqlite-shm
 data/medicine_optional_references.sqlite-wal
+data/embeddings/*.npz
 data/benchmark_runs/
 data/coverage.xml
 .coverage
