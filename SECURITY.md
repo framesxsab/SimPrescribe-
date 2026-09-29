@@ -1,30 +1,17 @@
 # Security Policy
 
-## Reporting Security Vulnerabilities
+## Supported versions
 
-The SimpliScribe team takes the security and privacy of healthcare data seriously. If you discover a security vulnerability or potential clinical safety issue, please report it responsibly.
+Private reports are accepted for the current release candidate and `main`.
 
-### How to Report
+## Report a vulnerability privately
 
-Please **do not** report security vulnerabilities via public GitHub issues. Instead:
+Use GitHub's [private vulnerability reporting form](https://github.com/framesxsab/SimPrescribe-/security/advisories/new). Private vulnerability reporting is enabled for this repository. Do not open a public issue or discussion with vulnerability details.
 
-1. Send an email to the security team or maintainers describing the vulnerability in detail.
-2. Include:
-   - Type of vulnerability (e.g., CSRF bypass, session hijacking, SQL injection, PHI leakage).
-   - Step-by-step reproduction instructions or proof-of-concept.
-   - Potential impact and affected versions.
-3. You will receive an acknowledgment within **48 hours**, followed by a timeline for triage and resolution.
+Include the affected commit or version, impact, and steps to reproduce. Redact patient information, prescription images, credentials, tokens, cookies, and database contents from reports and logs.
 
----
+If GitHub does not show the private report form, do not publish technical details. Use GitHub's [private contact/reporting route](https://github.com/framesxsab) for the repository owner to request a secure submission method, without disclosing the vulnerability publicly.
 
-## Security Architecture & Data Handling
+## Clinical safety and privacy
 
-SimpliScribe incorporates several baseline security mechanisms:
-
-* **Session Security**: Signed, HTTP-only session cookies with configurable TTL (`SESSION_MAX_AGE_SECONDS`) and strict CSRF verification on mutating endpoints.
-* **Content Security Policy (CSP)**: Restrictive default CSP headers preventing XSS and frame embedding (`X-Frame-Options: DENY`, `no-store` cache controls).
-* **Data Retention & Expiry**: Automated purge of historical prescription payloads beyond configured retention limits (`RETENTION_DAYS`, defaults to 30 days).
-* **Audit Logging**: Structured, immutable audit event logs for login, analysis creation, and clinical review actions.
-* **Fail-Closed Alternatives**: Model and web lookups for drug alternatives remain off by default (`ALTERNATIVES_ENABLED=false`) until explicitly enabled in trusted deployment environments.
-
-For a comprehensive threat analysis, consult [`docs/simpliscribe-threat-model.md`](docs/simpliscribe-threat-model.md).
+Report clinical-safety concerns privately when they expose a security or privacy vulnerability. Do not submit real patient data or unconsented prescription images. SimpliScribe is a human-reviewed aid; it does not diagnose, prescribe, or automatically substitute medicines.

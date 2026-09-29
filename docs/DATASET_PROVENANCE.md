@@ -1,31 +1,27 @@
 # Dataset licensing and provenance inventory
 
-This inventory describes the bundled medicine CSVs. The files stay in the repository. They are **reference lookup tables**, not a licensed formulary, not a prescribing source, and not clinical validation.
+This inventory records the exact upstream Kaggle records, source-file hashes, and separate terms for the two bundled medicine CSVs. The datasets and derived indexes are informational reference data, not a licensed formulary or clinical validation.
 
-Operators must confirm upstream terms before redistribution, commercial hosting, or use with identifiable prescriptions. Code is MIT licensed; dataset files may have separate terms.
+The application code is MIT licensed. The Kaggle source records license each dataset under CC BY-SA 4.0, separately from the code. The exact version-1 source-file bytes were downloaded and SHA-256 compared with the bundled Git LFS payloads on 2026-09-29.
 
-## Files that stay
+## Verified redistribution terms
 
-| File | Role in SimpliScribe | Columns used (app) | Approximate size |
-| --- | --- | --- | --- |
-| `A_Z_medicines_dataset_of_India.csv` | Brand and composition lookup for same-composition candidates | `name`, `manufacturer_name`, `type`, `short_composition1`, `short_composition2` | ~254k rows |
-| `all_medicine databased.csv` | Listed substitute brands for an unavailable medicine | `name`, `substitute0`–`substitute4` | ~248k rows |
+| Bundled file | Exact upstream file / dataset | Publisher and version | Size and SHA-256 match | License |
+| --- | --- | --- | --- | --- |
+| `A_Z_medicines_dataset_of_India.csv` | [A_Z_medicines_dataset_of_India.csv](https://www.kaggle.com/datasets/shudhanshusingh/az-medicine-dataset-of-india) | Shudhanshu Singh, *A-Z Medicine Dataset of India*, v1, 2022-11-17 | 32,061,801 bytes; `f89c1cdea39c615151201f15a99082e83c1aac0cd41a742d0f0c3a511c87a2d7` | CC BY-SA 4.0 |
+| `all_medicine databased.csv` | Kaggle file `medicine_dataset.csv` from [250k Medicines Usage, Side Effects and Substitutes](https://www.kaggle.com/datasets/shudhanshusingh/250k-medicines-usage-side-effects-and-substitutes) | Shudhanshu Singh, v1, 2023-03-23 | 89,406,712 bytes; `d4eafe39da664bd96b66930b8630be697b4cc9fa0d03638d523f5d84343b5ae1` | CC BY-SA 4.0 |
 
-Do not delete these CSVs as part of cleanup or unused-code jobs.
+The Kaggle version-1 file listings, names, sizes, creation dates, and license declarations were checked against the repository files on 2026-09-29. Each source file was downloaded temporarily and its contents hashed; both SHA-256 values above match the tracked Git LFS object exactly. The second CSV was renamed when bundled; its bytes were not changed.
 
-## Likely upstream sources (unverified against the exact bytes in this repo)
+## Attribution and derived indexes
 
-Column names and row counts are consistent with public Kaggle medicine tables commonly titled:
+For attribution, name Shudhanshu Singh, the exact dataset title, the linked Kaggle dataset page, and [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). State that the second source file was renamed in this repository. Do not imply endorsement by the uploader or pharmaceutical companies.
 
-- [A-Z Medicine Dataset of India](https://www.kaggle.com/datasets/shudhanshusingh/az-medicine-dataset-of-india)
-- [250k Medicines Usage, Side Effects and Substitutes](https://www.kaggle.com/datasets/shudhanshusingh/250k-medicines-usage-side-effects-and-substitutes) (often CC BY-SA 4.0 on Kaggle)
+The required SQLite lexicon index is derived from the A-Z dataset; the optional SQLite reference index is derived from the 250k dataset. If redistributed, these databases carry CC BY-SA 4.0 terms. Keep the MIT license for application code separate from the dataset/index notices in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
-Related combined dumps appear under other Kaggle titles (some labeled MIT). **The license shown on a similar dataset page is not proof that this repo’s copies match that snapshot or license.** Treat provenance as incomplete until an operator records:
+The uploader's dataset descriptions say the records were compiled from pharmaceutical companies / manufacturers, but do not enumerate source URLs for each underlying fact. This audit verifies the uploader's exact v1 files and published license declaration; it does not establish separate trademark, privacy, or other rights not granted by that license. CC BY-SA 4.0 requires attribution and licensing shared adaptations under the same license; see the [official deed](https://creativecommons.org/licenses/by-sa/4.0/) and [legal code on database rights](https://creativecommons.org/licenses/by-sa/4.0/legalcode#s4).
 
-1. Exact download URL and date
-2. Publisher / dataset version / checksum
-3. License text that applies to that version
-4. Whether share-alike or attribution obligations apply to derived apps
+Redistribution classification for both CSVs: **VERIFIED SHARE-ALIKE / SPECIAL TERMS**. The Kaggle uploader's CC BY-SA declaration is the basis for bundled redistribution; the MIT code license does not cover these datasets.
 
 ## Intended use and limits
 

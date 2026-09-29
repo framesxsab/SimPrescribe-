@@ -7,7 +7,13 @@ pinned: false
 
 # SimpliScribe
 
-SimpliScribe is a FastAPI application that simplifies prescription reading by extracting text from prescription images or PDFs and turning that OCR output into a structured medication summary.
+![Quality workflow](https://github.com/framesxsab/SimPrescribe-/actions/workflows/quality.yml/badge.svg)
+
+**Pre-release:** `0.2.0-rc.1`; this is not a stable or clinically validated release.
+
+SimpliScribe reads existing prescription images and PDFs and prepares a medicine list for human review. It does not diagnose, prescribe, or automatically substitute medicines.
+
+Start with [local installation](#local-development); contributor setup is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The patient upload now persists the private source before OCR, then opens a dedicated processing page that reads saved backend stages while OCR and structuring run. The analysis records `uploaded`, `processing`, `review_required`, `confirmed`, or `processing_failed`; OCR output is checkpointed before structuring. Patients can retry a failed stage from the saved prescription, save review edits before confirmation, and refresh the processing page without starting another analysis. Pharmacy matching requires confirmation. Required medicine aliases load from the fingerprinted SQLite index when it is current; build or refresh it with `python -m simpliscribe.build_lexicon_index`. A missing or stale index falls back to authoritative CSV construction, and an existing stale index is logged. The generated SQLite database is a rebuildable runtime artifact and is not committed. Optional substitutes, uses, and side effects are read by targeted name lookup from a separate fingerprinted SQLite index when details or reports are requested; composition remains part of the required lexicon data. Build the optional index with `python -m simpliscribe.build_optional_reference_index`. The generated database is a rebuildable, ignored runtime artifact. If it is missing, stale, or unavailable, core prescription details still render and the page labels optional reference information unavailable. Optional reference data is not loaded during upload, OCR, review, or confirmation. PDF reports are generated on demand; optional web/model alternative lookup does not delay review. The existing `/api/analyze` endpoint remains synchronous for API compatibility.
 
@@ -18,6 +24,8 @@ It also provides an authenticated prescription-first marketplace MVP: patients c
 ## Safety and intended use
 
 SimpliScribe is an open-source **review aid**, not a prescribing, diagnosis, dispensing, or autonomous clinical decision system. Every medicine name, strength, route, frequency, duration, interaction, and dataset reference candidate must be checked against the original prescription by a qualified clinician or pharmacist. The committed golden gate has ten synthetic cases and is a regression check, not evidence of clinical accuracy.
+
+The source code is MIT licensed. Bundled medicine CSVs and derived lookup indexes use separate CC BY-SA 4.0 terms; see [dataset provenance](docs/DATASET_PROVENANCE.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 **The platform helps patients understand and fulfil an existing prescription; it does not perform medical diagnosis.** Generic/equivalent entries are informational reference candidates and cannot replace an ordered prescription line automatically.
 
@@ -79,7 +87,7 @@ The first local request can take a few minutes because model weights may need to
 
 ### Alternative medicine reference candidates
 
-When a listed medicine may be unavailable, SimpliScribe first looks in the **bundled trained datasets**: CSV substitute columns and other brands that share the same composition. That local lookup does not send data off the machine.
+When a listed medicine may be unavailable, SimpliScribe first looks in the **bundled medicine reference datasets**: CSV substitute columns and other brands that share the same composition. That local lookup does not send data off the machine.
 
 If the local list is empty, the optional web/model lookup helper can add more **reference candidates** from a configured model or DuckDuckGo. The patient upload path does not invoke this helper during core structuring, even when enabled. It is **off by default** (fail-closed) because it sends data outside the box:
 
@@ -110,7 +118,7 @@ Governance and safety:
 
 ### Clean checkout prerequisites
 
-Use Python 3.11 for the full pinned runtime (the container uses 3.11.9; Windows RC validation used 3.11.15). The lightweight package metadata permits Python 3.10 or newer, but is not the complete native OCR environment. Local Python must include `venv`/`ensurepip` support; on Ubuntu install the matching `python3.X-venv` OS package when `python -m venv` reports that `ensurepip` is missing. Runtime packages are pinned in `requirements.txt`; development lint/coverage packages are in `requirements-dev.txt`. Native Linux also needs `libgl1`, `libglib2.0-0`, `libsm6`, `libxext6`, `libxrender1`, and `libgomp1` (the Dockerfile installs these). Node.js/npm are only needed for the Playwright suites. On Ubuntu, install Chromium system libraries with `npx playwright install-deps chromium` before running those suites. The full pytest suite also invokes the PostgreSQL recovery guard tests, so `pg_dump`, `pg_restore`, and `psql` from the PostgreSQL client package must be on `PATH`; the actual restore drill additionally needs a disposable PostgreSQL server.
+Use Python 3.11 (the container uses 3.11.9; Windows RC validation used 3.11.15). Package metadata requires Python >=3.11,<3.14. Local Python must include `venv`/`ensurepip` support; on Ubuntu install the matching `python3.X-venv` OS package when `python -m venv` reports that `ensurepip` is missing. Runtime packages are pinned in `requirements.txt`; development lint/coverage packages are in `requirements-dev.txt`. Native Linux also needs `libgl1`, `libglib2.0-0`, `libsm6`, `libxext6`, `libxrender1`, and `libgomp1` (the Dockerfile installs these). Node.js/npm are only needed for the Playwright suites. On Ubuntu, install Chromium system libraries with `npx playwright install-deps chromium` before running those suites. The full pytest suite also invokes the PostgreSQL recovery guard tests, so `pg_dump`, `pg_restore`, and `psql` from the PostgreSQL client package must be on `PATH`; the actual restore drill additionally needs a disposable PostgreSQL server.
 
 - **Source-controlled:** application code, migrations, `.env.example`, and the two medicine CSV datasets. The CSV files (`A_Z_medicines_dataset_of_India.csv`, `all_medicine databased.csv`) are Git LFS objects. Install Git LFS before cloning, run `git lfs install`, then clone and run `git lfs pull`. Without LFS, Git supplies pointer text instead of CSV data; validate with `python scripts/validate_datasets.py` before continuing.
 - **Generated at build/setup:** `data/medicine_lexicon.sqlite` is required and `data/medicine_optional_references.sqlite` is optional. Both are fingerprinted SQLite indexes generated from the LFS CSVs; neither is committed. Local setup commands below build them; Docker builds them into the image.
@@ -143,7 +151,7 @@ python -m pip install -r requirements.txt -r requirements-dev.txt
 Copy-Item .env.example .env
 ```
 
-For an existing uv-managed Python installation, `uv venv --python 3.11 --seed .venv-windows` replaces the first command. If activation is unavailable, use `.\.venv-windows\Scripts\python.exe -m ...` explicitly. The Windows RC was validated with Python 3.11.15, PaddlePaddle 3.2.2, PaddleOCR 3.4.0, PaddleX 3.4.3, NumPy 2.4.6, and only `opencv-contrib-python` 4.10.0.84. These native runtime packages are pinned in `requirements.txt`, which Docker and CI also install; `pyproject.toml` alone does not install the OCR runtime. Optional local-model dependencies remain in `requirements-local-model.txt`.
+For an existing uv-managed Python installation, `uv venv --python 3.11 --seed .venv-windows` replaces the first command. If activation is unavailable, use `.\.venv-windows\Scripts\python.exe -m ...` explicitly. The Windows RC was validated with Python 3.11.15, PaddlePaddle 3.2.2, PaddleOCR 3.4.0, PaddleX 3.4.3, NumPy 2.4.6, and only `opencv-contrib-python` 4.10.0.84. `requirements.txt` is the canonical runtime dependency list; `pyproject.toml` reads package dependencies from it, and Docker/CI install it directly. Optional local-model dependencies remain in `requirements-local-model.txt`.
 
 Set `INFERENCE_PROVIDER=fallback` in the local `.env` for a credential-free local run. Keep `.env`, virtual environments, databases, uploads, and OCR caches out of source control. `.env.example` supplies development-only local values and must not be used as a production secret file.
 
@@ -159,6 +167,20 @@ uvicorn app:app --reload
 ```
 
 The database starts empty and must be migrated to Alembic head (`0002_marketplace`) before use. Development and test startup retain `ensure_schema()` as a compatibility bootstrap. Production startup does not create schema; run `alembic upgrade head` before starting the application. `DATABASE_URL`, `SESSION_SECRET`, `INFERENCE_PROVIDER`, `OCR_CACHE_DIR`, and retention values can be set in `.env`; see `.env.example` for the complete supported configuration. A shared/production deployment must set a unique `SESSION_SECRET` of at least 32 characters, PostgreSQL `DATABASE_URL`, and authentication configuration as described in [Production safety configuration](#production-safety-configuration).
+
+## Build and install a Python distribution
+
+The wheel includes the app entry module, templates, static assets, Alembic migrations, the licensed CSV datasets, and third-party notices. Generated SQLite indexes, local databases, uploads, OCR models, vector caches, and virtual environments are excluded.
+
+```bash
+python -m pip install build
+python -m build
+python -m pip install dist/simpliscribe-0.2.0rc1-py3-none-any.whl
+```
+
+The package installs the full pinned OCR runtime. From the installed environment root, run `alembic upgrade head`, `python -m scripts.validate_datasets`, `python -m simpliscribe.build_lexicon_index`, and (optionally) `python -m simpliscribe.build_optional_reference_index` before starting with `uvicorn app:app --host 127.0.0.1 --port 7860`.
+
+The `simpliscribe` console command is a local development convenience: it starts Uvicorn with reload enabled on `0.0.0.0:8000`. Use the explicit Uvicorn command above for a package install or managed deployment.
 
 Create an approved demo pharmacy and starter exact-name inventory after initializing the database:
 
@@ -335,7 +357,7 @@ Requirements reviewed from supplied course material were distilled without copyi
 
 These are technical safeguards, not clinical validation. Patient and approved-pharmacy accounts support prescription fulfillment only; SimpliScribe does not add consultation/diagnosis records, automatic treatment decisions, medicine reminders, or drug-interaction decisioning.
 
-Code is MIT licensed. Dataset files may have separate upstream terms; see [docs/DATASET_PROVENANCE.md](docs/DATASET_PROVENANCE.md) before redistribution.
+Code is MIT licensed; the two exact bundled CSVs and their derived lookup indexes have separate CC BY-SA 4.0 terms. See [docs/DATASET_PROVENANCE.md](docs/DATASET_PROVENANCE.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Docker deployment
 
