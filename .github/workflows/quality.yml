@@ -34,7 +34,7 @@ jobs:
         run: python -c "from app import app; assert app.title"
       - name: Pytest with coverage report
         run: pytest -q --cov=simpliscribe --cov-report=term --cov-report=xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-xml
